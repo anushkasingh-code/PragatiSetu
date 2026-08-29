@@ -136,7 +136,7 @@ PragatiSetu/
 
 ---
 
-## 🎯 Completed Scope (Milestones 1–8)
+## 🎯 Completed Scope 
 
 - [x] Product Naming: **PragatiSetu**
 - [x] Standalone FastAPI REST API architecture with CORS & standardized error handlers
