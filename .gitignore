@@ -1,0 +1,22 @@
+# Local storage uploads directory
+uploads/
+*.db
+*.sqlite3
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment files
+.env
+.venv
+venv/
+ENV/
+
+# IDE files
+.vscode/
+.idea/

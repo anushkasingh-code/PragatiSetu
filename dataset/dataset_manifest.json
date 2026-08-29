@@ -1,0 +1,27 @@
+{
+  "dataset_name": "Site2Schedule AI Synthetic Dataset",
+  "problem_statement_id": "SIH26122",
+  "synthetic": true,
+  "generated_date": "2026-08-29",
+  "project_alpha": {
+    "activities": 75,
+    "events": 400,
+    "dprs": 63
+  },
+  "project_beta": {
+    "activities": 30,
+    "events": 100,
+    "dprs_internal_grouping": 20
+  },
+  "split_counts": {
+    "development": 280,
+    "validation": 60,
+    "test": 60
+  },
+  "validation_checks": {
+    "passed": 45,
+    "total": 45,
+    "failed": []
+  },
+  "disclaimer": "Entirely synthetic; not Oil India Limited data."
+}

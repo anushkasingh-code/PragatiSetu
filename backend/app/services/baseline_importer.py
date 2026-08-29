@@ -1,0 +1,222 @@
+import os
+import datetime
+import pandas as pd
+from typing import Dict, Any
+from sqlalchemy.orm import Session
+from backend.app.db.models.project import Project
+from backend.app.db.models.wbs import WBSNode
+from backend.app.db.models.activity import ScheduleActivity
+from backend.app.services.validation import (
+    validate_date_range,
+    validate_percent_complete,
+    validate_status,
+    validate_duplicate_activity_ids,
+    ValidationError
+)
+
+def _normalize_project_id(pid: str) -> str:
+    cleaned = str(pid).strip()
+    if cleaned.upper() in ("ALPHA-001", "ALPHA", "PROJECT-ALPHA", "PROJ_ALPHA"):
+        return "PROJ-ALPHA"
+    if cleaned.upper() in ("BETA-001", "BETA", "PROJECT-BETA", "PROJ_BETA"):
+        return "PROJ-BETA"
+    return cleaned
+
+class BaselineImporter:
+    def __init__(self, db_session: Session):
+        self.db = db_session
+
+    def import_excel_baseline(self, file_path: str) -> Dict[str, Any]:
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Baseline schedule file not found at: {file_path}")
+
+        excel_file = pd.ExcelFile(file_path)
+        sheets = excel_file.sheet_names
+
+        stats = {
+            "file_path": file_path,
+            "sheets_found": sheets,
+            "projects_imported": 0,
+            "wbs_nodes_imported": 0,
+            "activities_imported": 0,
+            "errors": []
+        }
+
+        # 1. Read Project sheet or Baseline sheet
+        if "Project" in sheets:
+            df_proj = pd.read_excel(file_path, sheet_name="Project")
+            for _, row in df_proj.iterrows():
+                proj_id = _normalize_project_id(row["project_id"])
+                proj_name = str(row["name"]).strip()
+                proj_desc = str(row["description"]) if pd.notnull(row.get("description")) else None
+                
+                existing_proj = self.db.query(Project).filter(Project.project_id == proj_id).first()
+                if not existing_proj:
+                    proj = Project(
+                        project_id=proj_id,
+                        name=proj_name,
+                        description=proj_desc
+                    )
+                    self.db.add(proj)
+                else:
+                    existing_proj.name = proj_name
+                    existing_proj.description = proj_desc
+                stats["projects_imported"] += 1
+        elif "Baseline" in sheets:
+            df_base = pd.read_excel(file_path, sheet_name="Baseline")
+            df_base_projs = df_base[["project_id", "project_name"]].copy()
+            df_base_projs["norm_proj_id"] = df_base_projs["project_id"].apply(_normalize_project_id)
+            unique_projs = df_base_projs[["norm_proj_id", "project_name"]].drop_duplicates()
+            for _, row in unique_projs.iterrows():
+                proj_id = str(row["norm_proj_id"]).strip()
+                proj_name = str(row["project_name"]).strip()
+                existing_proj = self.db.query(Project).filter(Project.project_id == proj_id).first()
+                if not existing_proj:
+                    proj = Project(project_id=proj_id, name=proj_name, description=f"{proj_name} Baseline Project")
+                    self.db.add(proj)
+                else:
+                    existing_proj.name = proj_name
+                stats["projects_imported"] += 1
+
+        self.db.flush()
+
+        # 2. Read WBS_Nodes sheet or Baseline sheet
+        if "WBS_Nodes" in sheets:
+            df_wbs = pd.read_excel(file_path, sheet_name="WBS_Nodes")
+            # Sort WBS nodes by level to respect parent hierarchy insertion
+            if "level" in df_wbs.columns:
+                df_wbs = df_wbs.sort_values(by="level")
+
+            for _, row in df_wbs.iterrows():
+                wbs_id = str(row["wbs_id"]).strip()
+                proj_id = _normalize_project_id(row["project_id"])
+                parent_id = str(row["parent_wbs_id"]).strip() if pd.notnull(row.get("parent_wbs_id")) and str(row.get("parent_wbs_id")).strip() != "None" else None
+                level = int(row["level"])
+                name = str(row["name"]).strip()
+
+                existing_wbs = self.db.query(WBSNode).filter(WBSNode.wbs_id == wbs_id).first()
+                if not existing_wbs:
+                    wbs = WBSNode(
+                        wbs_id=wbs_id,
+                        project_id=proj_id,
+                        parent_wbs_id=parent_id,
+                        level=level,
+                        name=name
+                    )
+                    self.db.add(wbs)
+                else:
+                    existing_wbs.name = name
+                    existing_wbs.level = level
+                    existing_wbs.parent_wbs_id = parent_id
+                stats["wbs_nodes_imported"] += 1
+        elif "Baseline" in sheets:
+            df_base = pd.read_excel(file_path, sheet_name="Baseline")
+            # Extract WBS nodes from wbs_level_1, wbs_level_2, wbs_level_3 columns
+            wbs_nodes_seen = set()
+            for _, row in df_base.iterrows():
+                proj_id = _normalize_project_id(row["project_id"])
+                l1 = str(row["wbs_level_1"]).strip() if pd.notnull(row.get("wbs_level_1")) else None
+                l2 = str(row["wbs_level_2"]).strip() if pd.notnull(row.get("wbs_level_2")) else None
+                l3 = str(row["wbs_level_3"]).strip() if pd.notnull(row.get("wbs_level_3")) else None
+
+                if l1 and l1 not in wbs_nodes_seen:
+                    wbs_nodes_seen.add(l1)
+                    if not self.db.query(WBSNode).filter(WBSNode.wbs_id == l1).first():
+                        self.db.add(WBSNode(wbs_id=l1, project_id=proj_id, level=1, name=l1))
+                    stats["wbs_nodes_imported"] += 1
+                if l2 and l2 not in wbs_nodes_seen:
+                    wbs_nodes_seen.add(l2)
+                    if not self.db.query(WBSNode).filter(WBSNode.wbs_id == l2).first():
+                        self.db.add(WBSNode(wbs_id=l2, project_id=proj_id, parent_wbs_id=l1, level=2, name=l2))
+                    stats["wbs_nodes_imported"] += 1
+                if l3 and l3 not in wbs_nodes_seen:
+                    wbs_nodes_seen.add(l3)
+                    if not self.db.query(WBSNode).filter(WBSNode.wbs_id == l3).first():
+                        self.db.add(WBSNode(wbs_id=l3, project_id=proj_id, parent_wbs_id=l2, level=3, name=l3))
+                    stats["wbs_nodes_imported"] += 1
+
+        self.db.flush()
+
+        # 3. Read Activities sheet or Baseline sheet
+        if "Activities" in sheets or "Baseline" in sheets:
+            sheet_name = "Activities" if "Activities" in sheets else "Baseline"
+            df_act = pd.read_excel(file_path, sheet_name=sheet_name)
+            
+            # Check duplicate activity IDs in file
+            act_ids = [str(r).strip() for r in df_act["activity_id"].dropna()]
+            validate_duplicate_activity_ids(act_ids)
+
+            for _, row in df_act.iterrows():
+                act_id = str(row["activity_id"]).strip()
+                proj_id = _normalize_project_id(row["project_id"])
+                
+                # Handle wbs_id
+                wbs_id = None
+                if pd.notnull(row.get("wbs_id")):
+                    wbs_id = str(row.get("wbs_id")).strip()
+                elif pd.notnull(row.get("wbs_level_3")):
+                    wbs_id = str(row.get("wbs_level_3")).strip()
+                elif pd.notnull(row.get("wbs_level_2")):
+                    wbs_id = str(row.get("wbs_level_2")).strip()
+
+                discipline = str(row["discipline"]).strip()
+                desc_col = "activity_description" if "activity_description" in row else "description"
+                description = str(row[desc_col]).strip()
+                location = str(row["location"]).strip() if pd.notnull(row.get("location")) else None
+                eq_line_id = str(row["equipment_or_line_id"]).strip() if pd.notnull(row.get("equipment_or_line_id")) else None
+                
+                # Parse dates
+                p_start = pd.to_datetime(row["planned_start"]).date()
+                p_finish = pd.to_datetime(row["planned_finish"]).date()
+
+                # Validate planned dates
+                validate_date_range(p_start, p_finish)
+
+                # Parse actuals & validation
+                pct_col = "planned_percent_complete" if "planned_percent_complete" in row else "percent_complete"
+                pct = float(row.get(pct_col, 0.0))
+                if pd.isna(pct):
+                    pct = 0.0
+                validate_percent_complete(pct)
+
+                status_col = "baseline_status" if "baseline_status" in row else "status"
+                status = str(row.get(status_col, "NOT_STARTED")).strip()
+                if status not in ("NOT_STARTED", "STARTED", "IN_PROGRESS", "COMPLETED"):
+                    status = "NOT_STARTED"
+                validate_status(status)
+
+                pred_id = str(row.get("predecessor_activity_id")).strip() if pd.notnull(row.get("predecessor_activity_id")) and str(row.get("predecessor_activity_id")).strip() not in ("None", "nan") else None
+
+                existing_act = self.db.query(ScheduleActivity).filter(ScheduleActivity.activity_id == act_id).first()
+                if not existing_act:
+                    act = ScheduleActivity(
+                        activity_id=act_id,
+                        project_id=proj_id,
+                        wbs_id=wbs_id,
+                        discipline=discipline,
+                        description=description,
+                        location=location,
+                        equipment_or_line_id=eq_line_id,
+                        planned_start=p_start,
+                        planned_finish=p_finish,
+                        percent_complete=pct,
+                        status=status,
+                        predecessor_activity_id=pred_id
+                    )
+                    self.db.add(act)
+                else:
+                    existing_act.wbs_id = wbs_id
+                    existing_act.discipline = discipline
+                    existing_act.description = description
+                    existing_act.location = location
+                    existing_act.equipment_or_line_id = eq_line_id
+                    existing_act.planned_start = p_start
+                    existing_act.planned_finish = p_finish
+                    existing_act.percent_complete = pct
+                    existing_act.status = status
+                    existing_act.predecessor_activity_id = pred_id
+
+                stats["activities_imported"] += 1
+
+        self.db.commit()
+        return stats
