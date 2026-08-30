@@ -161,7 +161,7 @@ def test_19_top_2_margin(db_session):
     _, candidates, margin = service.generate_candidates_for_event("EVT-MARGIN-01", top_n=5)
 
     if len(candidates) >= 2:
-        expected_margin = round(candidates[0].overall_score - candidates[1].overall_score, 2)
+        expected_margin = round(float(candidates[0].overall_score) - float(candidates[1].overall_score), 2)
         assert margin == expected_margin
 
 def test_20_top_candidate_limit(db_session):

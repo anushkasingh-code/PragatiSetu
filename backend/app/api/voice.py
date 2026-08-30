@@ -26,7 +26,7 @@ async def transcribe_audio_endpoint(
     file_bytes = await file.read()
     try:
         trans_record = transcribe_uploaded_audio(
-            filename=file.filename,
+            filename=file.filename or "unknown",
             file_bytes=file_bytes,
             project_id=project_id,
             db=db

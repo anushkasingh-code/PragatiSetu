@@ -34,11 +34,13 @@ from backend.app.services.candidate_generator_service import CandidateGeneratorS
 from backend.app.services.evidence_service import calculate_evidence_completeness, derive_evidence_reasons
 from backend.app.services.decision_policy import (
     evaluate_decision_policy,
-    MATCH_SCORE_THRESHOLD,
-    EVIDENCE_COMPLETENESS_THRESHOLD,
-    TOP2_MARGIN_THRESHOLD,
     SCORING_POLICY_VERSION
 )
+# Threshold constants are now read from settings at runtime (configurable via .env)
+from backend.app.config import settings as _settings
+MATCH_SCORE_THRESHOLD = _settings.MATCH_SCORE_THRESHOLD
+EVIDENCE_COMPLETENESS_THRESHOLD = _settings.EVIDENCE_COMPLETENESS_THRESHOLD
+TOP2_MARGIN_THRESHOLD = _settings.TOP2_MARGIN_THRESHOLD
 from backend.app.services.decision_service import DecisionService
 from backend.app.services.state_validator import (
     validate_state_transition,

@@ -5,7 +5,7 @@ from backend.app.config import settings
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".webm", ".ogg", ".flac"}
 
 class AudioValidationError(Exception):
-    def __init__(self, message: str, code: str, details: dict = None):
+    def __init__(self, message: str, code: str, details: dict | None = None):
         super().__init__(message)
         self.message = message
         self.code = code

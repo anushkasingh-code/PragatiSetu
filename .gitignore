@@ -20,3 +20,19 @@ ENV/
 # IDE files
 .vscode/
 .idea/
+
+# Logs
+*.log
+logs/
+tmp/
+
+# OS junk
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# Node / Frontend
+node_modules/
+.next/
+dist/
+build/

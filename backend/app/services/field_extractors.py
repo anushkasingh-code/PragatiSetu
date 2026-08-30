@@ -3,28 +3,40 @@ import datetime
 from typing import Dict, Any, Optional, Tuple
 
 STATUS_PATTERNS = [
-    (r"\b(completed|complete|finished|done)\b", "COMPLETED"),
-    (r"\b(ongoing|in progress|continued|progressing)\b", "IN_PROGRESS"),
-    (r"\b(commenced|started|began|initiated)\b", "STARTED"),
-    (r"\b(not started|pending)\b", "NOT_STARTED")
+    (r"\b(completed|complete|finished|done|accomplished|executed|performed|carried out|wound up)\b", "COMPLETED"),
+    (r"\b(ongoing|in progress|continued|progressing|continuing|underway|in-progress|carrying on|in hand)\b", "IN_PROGRESS"),
+    (r"\b(commenced|started|began|initiated|begun|kicked off|start ho gaya|start hua)\b", "STARTED"),
+    (r"\b(not started|pending|yet to start)\b", "NOT_STARTED")
 ]
+
+# Negation phrases that invalidate a status match
+NEGATION_PREFIXES_REGEX = re.compile(
+    r"\b(no work|no activities|not|no one|none|zero|nil|nothing)\s+(was\s+|were\s+|has been\s+|have been\s+)?",
+    re.IGNORECASE
+)
 
 PERCENT_REGEX = re.compile(r"(\d+(?:\.\d+)?)\s*(?:%|percent|per cent)", re.IGNORECASE)
 
-# Action vocabulary informed by dataset inspection
+# Action vocabulary informed by dataset inspection and field terminology
 ACTION_PATTERNS = [
-    r"\b(hydrostatic testing|hydrotesting|testing)\b",
+    r"\b(hydrostatic testing|hydrotesting|testing|hydrotest)\b",
     r"\b(tie-in|hot tie-in connection|tie in)\b",
     r"\b(cable pulling|cable laying|laying|pulling)\b",
     r"\b(pump alignment|alignment)\b",
     r"\b(shuttering|formwork)\b",
-    r"\b(excavation|digging)\b",
-    r"\b(concreting|pouring)\b",
+    r"\b(excavation|digging|earthwork)\b",
+    r"\b(backfilling|backfill)\b",
+    r"\b(concreting|pouring|concrete pouring)\b",
     r"\b(reinforcement|rebar)\b",
     r"\b(erection|installation|installing|erecting)\b",
-    r"\b(fabrication|welding)\b",
-    r"\b(commissioning)\b",
-    r"\b(painting)\b",
+    r"\b(fabrication|welding|weld)\b",
+    r"\b(commissioning|pre-commissioning)\b",
+    r"\b(painting|coating)\b",
+    r"\b(repair|maintenance|fixing)\b",
+    r"\b(drainage|dewatering)\b",
+    r"\b(grouting|grout)\b",
+    r"\b(insulation|cladding)\b",
+    r"\b(inspection|checking|testing)\b",
 ]
 
 # Object vocabulary
@@ -33,10 +45,13 @@ OBJECT_PATTERNS = [
     r"\b(foundation|footing)\b",
     r"\b(cable tray|cable|wire)\b",
     r"\b(pump|compressor|generator)\b",
-    r"\b(support|tray support|structural support)\b",
+    r"\b(support|tray support|structural support|cable tray support)\b",
     r"\b(valve|flange)\b",
     r"\b(substation|panel)\b",
-    r"\b(tank|vessel)\b"
+    r"\b(tank|vessel)\b",
+    r"\b(drainage|drain)\b",
+    r"\b(structure|structural|platform)\b",
+    r"\b(road|surface|pavement)\b",
 ]
 
 # Identifier patterns (e.g. 24P201, 24-P-201, EQ-ALPHA-101, LINE-ALPHA-201, F12, E-301, P-101A)
@@ -81,7 +96,13 @@ def extract_status(text: str) -> Optional[str]:
             return "NOT_STARTED"
 
     for pattern, status in STATUS_PATTERNS:
-        if re.search(pattern, text, re.IGNORECASE):
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            # Check for a negation prefix immediately before the matched keyword
+            start = m.start()
+            prefix_window = text[max(0, start - 30):start]
+            if NEGATION_PREFIXES_REGEX.search(prefix_window):
+                continue  # Negated — don't count as status
             return status
     return None
 

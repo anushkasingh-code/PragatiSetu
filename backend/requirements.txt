@@ -6,9 +6,12 @@ pydantic>=2.0.0
 pydantic-settings>=2.0.0
 pandas>=2.0.0
 openpyxl>=3.1.0
-psycopg2-binary>=2.9.0
+python-multipart>=0.0.6
 pytest>=7.0.0
 httpx>=0.24.0
 rapidfuzz>=3.0.0
 sentence-transformers>=2.2.0
-faster-whisper>=1.0.0
+# Optional – local voice STT (CPU-compatible):
+# faster-whisper>=1.0.0
+# Optional – PostgreSQL production database (SQLite used by default):
+# psycopg2-binary>=2.9.0

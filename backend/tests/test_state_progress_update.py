@@ -105,7 +105,7 @@ def test_3_date_ordering_validation():
 
     invalid, err = validate_date_ordering(date(2026, 1, 10), date(2026, 1, 1))
     assert invalid is False
-    assert "INVALID_DATE_ORDER" in err
+    assert err is not None and "INVALID_DATE_ORDER" in err
 
 def test_4_percentage_validation():
     v1, _ = validate_percentage(50.0)

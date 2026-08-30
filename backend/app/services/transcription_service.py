@@ -24,7 +24,7 @@ class TranscriptionService:
 
         # Try faster-whisper first
         try:
-            from faster_whisper import WhisperModel
+            from faster_whisper import WhisperModel  # type: ignore
             logger.info(f"Loading faster-whisper model '{model_size}' on {device} ({compute_type})...")
             self._model = WhisperModel(model_size, device=device, compute_type=compute_type)
             self._engine_type = "faster-whisper"
@@ -37,7 +37,7 @@ class TranscriptionService:
 
         # Try openai-whisper fallback
         try:
-            import whisper
+            import whisper  # type: ignore
             logger.info(f"Loading openai-whisper model '{model_size}' on {device}...")
             self._model = whisper.load_model(model_size, device=device)
             self._engine_type = "openai-whisper"
@@ -67,6 +67,7 @@ class TranscriptionService:
         """
         if not self.is_available:
             raise RuntimeError("Local Speech-to-Text engine is unavailable in current environment.")
+        assert self._model is not None
 
         start_time = time.time()
 

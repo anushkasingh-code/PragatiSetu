@@ -1,0 +1,92 @@
+/Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py:49:49 - error: Argument of type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" cannot be assigned to parameter "pid" of type "str" in function "_normalize_project_id"
+    Type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" is not assignable to type "str"
+      "Series" is not assignable to "str" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py:92:49 - error: Argument of type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" cannot be assigned to parameter "pid" of type "str" in function "_normalize_project_id"
+    Type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" is not assignable to type "str"
+      "Series" is not assignable to "str" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py:94:29 - error: Argument of type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" cannot be assigned to parameter "x" of type "ConvertibleToInt" in function "__new__"
+    Type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" is not assignable to type "ConvertibleToInt"
+      Type "Series" is not assignable to type "ConvertibleToInt"
+        "Series" is not assignable to "str"
+        "Series" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "Series" is incompatible with protocol "SupportsInt"
+          "__int__" is not present
+        "Series" is incompatible with protocol "SupportsIndex"
+    ... (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py:94:29 - error: Argument of type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" cannot be assigned to parameter "x" of type "ConvertibleToInt" in function "__new__"
+    Type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" is not assignable to type "ConvertibleToInt"
+      Type "Series" is not assignable to type "ConvertibleToInt"
+        "Series" is not assignable to "str"
+        "Series" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "Series" is incompatible with protocol "SupportsInt"
+          "__int__" is not present
+        "Series" is incompatible with protocol "SupportsIndex" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py:117:49 - error: Argument of type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" cannot be assigned to parameter "pid" of type "str" in function "_normalize_project_id"
+    Type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" is not assignable to type "str"
+      "Series" is not assignable to "str" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py:151:49 - error: Argument of type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" cannot be assigned to parameter "pid" of type "str" in function "_normalize_project_id"
+    Type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" is not assignable to type "str"
+      "Series" is not assignable to "str" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py:177:29 - error: Argument of type "Unknown | None" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Unknown | None" is not assignable to type "ConvertibleToFloat"
+      Type "None" is not assignable to type "ConvertibleToFloat"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "None" is incompatible with protocol "SupportsFloat"
+          "__float__" is not present
+        "None" is incompatible with protocol "SupportsIndex"
+    ... (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py:177:29 - error: Argument of type "Unknown | None" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Unknown | None" is not assignable to type "ConvertibleToFloat"
+      Type "None" is not assignable to type "ConvertibleToFloat"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "None" is incompatible with protocol "SupportsFloat"
+          "__float__" is not present
+        "None" is incompatible with protocol "SupportsIndex" (reportArgumentType)
+/Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/event_extraction_service.py
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/event_extraction_service.py:160:33 - error: Argument of type "Unknown | None" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Unknown | None" is not assignable to type "ConvertibleToFloat"
+      Type "None" is not assignable to type "ConvertibleToFloat"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "None" is incompatible with protocol "SupportsFloat"
+          "__float__" is not present
+        "None" is incompatible with protocol "SupportsIndex"
+    ... (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/event_extraction_service.py:160:33 - error: Argument of type "Unknown | None" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Unknown | None" is not assignable to type "ConvertibleToFloat"
+      Type "None" is not assignable to type "ConvertibleToFloat"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "None" is incompatible with protocol "SupportsFloat"
+          "__float__" is not present
+        "None" is incompatible with protocol "SupportsIndex" (reportArgumentType)
+/Users/uday/Desktop/Pragati Setu/PragatiSetu/scripts/evaluate_extraction.py
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/scripts/evaluate_extraction.py:37:26 - error: Argument of type "Unknown | None" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Unknown | None" is not assignable to type "ConvertibleToFloat"
+      Type "None" is not assignable to type "ConvertibleToFloat"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "None" is incompatible with protocol "SupportsFloat"
+          "__float__" is not present
+        "None" is incompatible with protocol "SupportsIndex"
+    ... (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/scripts/evaluate_extraction.py:37:26 - error: Argument of type "Unknown | None" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Unknown | None" is not assignable to type "ConvertibleToFloat"
+      Type "None" is not assignable to type "ConvertibleToFloat"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "None" is incompatible with protocol "SupportsFloat"
+          "__float__" is not present
+        "None" is incompatible with protocol "SupportsIndex" (reportArgumentType)
+12 errors, 0 warnings, 0 informations

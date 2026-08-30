@@ -1,5 +1,6 @@
 import uuid
 import datetime
+from pathlib import Path
 from typing import Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from backend.app.db.models.project import Project
@@ -13,6 +14,18 @@ from backend.app.services.file_validator import (
     ReportValidationError
 )
 
+
+def _sanitize_filename(filename: str) -> str:
+    """
+    Strips all directory components from the filename to prevent
+    path traversal sequences (e.g., ../../evil.txt → evil.txt).
+    Falls back to 'uploaded_report.bin' if the result is empty or ambiguous.
+    """
+    safe = Path(filename).name.strip()
+    if not safe or safe in (".", ".."):
+        safe = "uploaded_report.bin"
+    return safe
+
 class ReportIngestionService:
     def __init__(self, db: Session):
         self.db = db
@@ -23,12 +36,15 @@ class ReportIngestionService:
         filename: str,
         content: bytes,
         report_date_input: Any,
-        discipline_input: str = None
+        discipline_input: str | None = None
     ) -> Tuple[bool, Dict[str, Any], SourceReport]:
         """
         Orchestrates full report validation, duplicate checking, local storage, and database persistence.
         Returns tuple: (is_duplicate: bool, result_dict: dict, report: SourceReport)
         """
+        # 0. Sanitize filename to prevent path traversal (../../evil.txt → evil.txt)
+        filename = _sanitize_filename(filename)
+
         # 1. Verify Project Existence
         project = self.db.query(Project).filter(Project.project_id == project_id).first()
         if not project:
