@@ -1,6 +1,7 @@
 import datetime
 from typing import Tuple, List, Dict, Any, Optional
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from backend.app.db.models.event import ExtractedEvent
 from backend.app.db.models.activity import ScheduleActivity
 from backend.app.db.models.decision import MatchDecision
@@ -201,6 +202,28 @@ class ProgressUpdateService:
                 "audit_id": audit.audit_id
             }
 
+        except IntegrityError:
+            # DB-level unique constraint on audit.event_id fired: a concurrent thread already
+            # committed this exact event → roll back and report as already applied (BUG-002 fix)
+            self.db.rollback()
+            existing_audit = self.db.query(AuditRecord).filter(AuditRecord.event_id == event_id).first()
+            refreshed_act = self.db.query(ScheduleActivity).filter(ScheduleActivity.activity_id == decision.top_activity_id).first() if decision.top_activity_id else None
+            return {
+                "event_id": event.event_id,
+                "activity_id": refreshed_act.activity_id if refreshed_act else None,
+                "decision": decision.decision,
+                "applied": True,
+                "already_applied": True,
+                "status": refreshed_act.status if refreshed_act else None,
+                "percent_complete": refreshed_act.percent_complete if refreshed_act else None,
+                "actual_start": str(refreshed_act.actual_start) if refreshed_act and refreshed_act.actual_start else None,
+                "actual_finish": str(refreshed_act.actual_finish) if refreshed_act and refreshed_act.actual_finish else None,
+                "warnings": [w["message"] for w in warnings],
+                "conflicts": [],
+                "audit_id": existing_audit.audit_id if existing_audit else None
+            }
+
         except Exception as e:
             self.db.rollback()
             raise RuntimeError(f"Atomic transaction failed during schedule progress update: {str(e)}")
+
