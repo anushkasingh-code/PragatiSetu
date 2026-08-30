@@ -196,7 +196,7 @@ def test_19_derived_reasons_output(db_session):
     _, dec = service.make_decision_for_event("EVT-REASON-DEC")
 
     assert dec.reasons is not None
-    assert len(dec.reasons) > 0
+    assert isinstance(dec.reasons, list) and len(dec.reasons) > 0
 
 def test_20_zero_schedule_modification_guarantee(db_session):
     # Retrieve initial state of all activities

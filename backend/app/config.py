@@ -1,6 +1,5 @@
 import os
-from pydantic_settings import BaseSettings
-from pydantic import ConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "PragatiSetu Backend"
@@ -27,6 +26,6 @@ class Settings(BaseSettings):
     EVIDENCE_COMPLETENESS_THRESHOLD: float = float(os.getenv("EVIDENCE_COMPLETENESS_THRESHOLD", "70.0"))
     TOP2_MARGIN_THRESHOLD: float = float(os.getenv("TOP2_MARGIN_THRESHOLD", "12.0"))
 
-    model_config = ConfigDict(env_file=".env", case_sensitive=True)
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
 
 settings = Settings()

@@ -1,0 +1,214 @@
+/Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/api/candidates.py
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/api/candidates.py:89:36 - error: Argument of type "Column[Unknown]" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Column[Unknown]" is not assignable to type "ConvertibleToFloat"
+      "Column[Unknown]" is not assignable to "str"
+      "Column[Unknown]" is incompatible with protocol "Buffer"
+        "__buffer__" is not present
+      "Column[Unknown]" is incompatible with protocol "SupportsFloat"
+        "__float__" is not present
+      "Column[Unknown]" is incompatible with protocol "SupportsIndex"
+        "__index__" is not present (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/api/candidates.py:89:73 - error: Argument of type "Column[Unknown]" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Column[Unknown]" is not assignable to type "ConvertibleToFloat"
+      "Column[Unknown]" is not assignable to "str"
+      "Column[Unknown]" is incompatible with protocol "Buffer"
+        "__buffer__" is not present
+      "Column[Unknown]" is incompatible with protocol "SupportsFloat"
+        "__float__" is not present
+      "Column[Unknown]" is incompatible with protocol "SupportsIndex"
+        "__index__" is not present (reportArgumentType)
+/Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py:49:49 - error: Argument of type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" cannot be assigned to parameter "pid" of type "str" in function "_normalize_project_id"
+    Type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" is not assignable to type "str"
+      "Series" is not assignable to "str" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py:92:49 - error: Argument of type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" cannot be assigned to parameter "pid" of type "str" in function "_normalize_project_id"
+    Type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" is not assignable to type "str"
+      "Series" is not assignable to "str" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py:94:29 - error: Argument of type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" cannot be assigned to parameter "x" of type "ConvertibleToInt" in function "__new__"
+    Type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" is not assignable to type "ConvertibleToInt"
+      Type "Series" is not assignable to type "ConvertibleToInt"
+        "Series" is not assignable to "str"
+        "Series" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "Series" is incompatible with protocol "SupportsInt"
+          "__int__" is not present
+        "Series" is incompatible with protocol "SupportsIndex"
+    ... (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py:94:29 - error: Argument of type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" cannot be assigned to parameter "x" of type "ConvertibleToInt" in function "__new__"
+    Type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" is not assignable to type "ConvertibleToInt"
+      Type "Series" is not assignable to type "ConvertibleToInt"
+        "Series" is not assignable to "str"
+        "Series" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "Series" is incompatible with protocol "SupportsInt"
+          "__int__" is not present
+        "Series" is incompatible with protocol "SupportsIndex" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py:117:49 - error: Argument of type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" cannot be assigned to parameter "pid" of type "str" in function "_normalize_project_id"
+    Type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" is not assignable to type "str"
+      "Series" is not assignable to "str" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py:151:49 - error: Argument of type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" cannot be assigned to parameter "pid" of type "str" in function "_normalize_project_id"
+    Type "Series | ndarray[_AnyShape, dtype[Any]] | Any | Unknown" is not assignable to type "str"
+      "Series" is not assignable to "str" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py:177:29 - error: Argument of type "Unknown | None" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Unknown | None" is not assignable to type "ConvertibleToFloat"
+      Type "None" is not assignable to type "ConvertibleToFloat"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "None" is incompatible with protocol "SupportsFloat"
+          "__float__" is not present
+        "None" is incompatible with protocol "SupportsIndex"
+    ... (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/baseline_importer.py:177:29 - error: Argument of type "Unknown | None" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Unknown | None" is not assignable to type "ConvertibleToFloat"
+      Type "None" is not assignable to type "ConvertibleToFloat"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "None" is incompatible with protocol "SupportsFloat"
+          "__float__" is not present
+        "None" is incompatible with protocol "SupportsIndex" (reportArgumentType)
+/Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/candidate_generator_service.py
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/candidate_generator_service.py:26:60 - error: Argument of type "Column[str]" cannot be assigned to parameter "raw_identifier" of type "str | None" in function "normalize_identifier"
+    Type "Column[str]" is not assignable to type "str | None"
+      "Column[str]" is not assignable to "str"
+      "Column[str]" is not assignable to "None" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/candidate_generator_service.py:27:52 - error: Argument of type "Column[str]" cannot be assigned to parameter "raw_action" of type "str | None" in function "normalize_action"
+    Type "Column[str]" is not assignable to type "str | None"
+      "Column[str]" is not assignable to "str"
+      "Column[str]" is not assignable to "None" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/candidate_generator_service.py:28:52 - error: Argument of type "Column[str]" cannot be assigned to parameter "raw_object" of type "str | None" in function "normalize_object"
+    Type "Column[str]" is not assignable to type "str | None"
+      "Column[str]" is not assignable to "str"
+      "Column[str]" is not assignable to "None" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/candidate_generator_service.py:29:56 - error: Argument of type "Column[str]" cannot be assigned to parameter "raw_location" of type "str | None" in function "normalize_location"
+    Type "Column[str]" is not assignable to type "str | None"
+      "Column[str]" is not assignable to "str"
+      "Column[str]" is not assignable to "None" (reportArgumentType)
+/Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/decision_service.py
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/decision_service.py:32:40 - error: Argument of type "Column[Unknown]" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Column[Unknown]" is not assignable to type "ConvertibleToFloat"
+      "Column[Unknown]" is not assignable to "str"
+      "Column[Unknown]" is incompatible with protocol "Buffer"
+        "__buffer__" is not present
+      "Column[Unknown]" is incompatible with protocol "SupportsFloat"
+        "__float__" is not present
+      "Column[Unknown]" is incompatible with protocol "SupportsIndex"
+        "__index__" is not present (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/decision_service.py:32:77 - error: Argument of type "Column[Unknown]" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Column[Unknown]" is not assignable to type "ConvertibleToFloat"
+      "Column[Unknown]" is not assignable to "str"
+      "Column[Unknown]" is incompatible with protocol "Buffer"
+        "__buffer__" is not present
+      "Column[Unknown]" is incompatible with protocol "SupportsFloat"
+        "__float__" is not present
+      "Column[Unknown]" is incompatible with protocol "SupportsIndex"
+        "__index__" is not present (reportArgumentType)
+/Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/event_extraction_service.py
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/event_extraction_service.py:81:45 - error: Argument of type "Column[str] | Literal['']" cannot be assigned to parameter "raw_text" of type "str" in function "segment_text_into_events"
+    Type "Column[str] | Literal['']" is not assignable to type "str"
+      "Column[str]" is not assignable to "str" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/event_extraction_service.py:132:46 - error: Argument of type "Column[str] | Literal['']" cannot be assigned to parameter "initial_value" of type "str | None" in function "__init__"
+    Type "Column[str] | Literal['']" is not assignable to type "str | None"
+      Type "Column[str]" is not assignable to type "str | None"
+        "Column[str]" is not assignable to "str"
+        "Column[str]" is not assignable to "None" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/event_extraction_service.py:134:47 - error: Argument of type "Column[str] | Literal['']" cannot be assigned to parameter "initial_value" of type "str | None" in function "__init__"
+    Type "Column[str] | Literal['']" is not assignable to type "str | None"
+      Type "Column[str]" is not assignable to type "str | None"
+        "Column[str]" is not assignable to "str"
+        "Column[str]" is not assignable to "None" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/event_extraction_service.py:160:33 - error: Argument of type "Unknown | None" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Unknown | None" is not assignable to type "ConvertibleToFloat"
+      Type "None" is not assignable to type "ConvertibleToFloat"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "None" is incompatible with protocol "SupportsFloat"
+          "__float__" is not present
+        "None" is incompatible with protocol "SupportsIndex"
+    ... (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/event_extraction_service.py:160:33 - error: Argument of type "Unknown | None" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Unknown | None" is not assignable to type "ConvertibleToFloat"
+      Type "None" is not assignable to type "ConvertibleToFloat"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "None" is incompatible with protocol "SupportsFloat"
+          "__float__" is not present
+        "None" is incompatible with protocol "SupportsIndex" (reportArgumentType)
+/Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/progress_update_service.py
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/progress_update_service.py:124:29 - error: Argument of type "Column[str] | Literal['COMPLETED', 'STARTED', 'IN_PROGRESS', 'REWORK']" cannot be assigned to parameter "proposed_status" of type "str" in function "detect_schedule_conflicts"
+    Type "Column[str] | Literal['COMPLETED', 'STARTED', 'IN_PROGRESS', 'REWORK']" is not assignable to type "str"
+      "Column[str]" is not assignable to "str" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/progress_update_service.py:125:30 - error: Argument of type "float | Column[Unknown]" cannot be assigned to parameter "proposed_percent" of type "float | None" in function "detect_schedule_conflicts"
+    Type "float | Column[Unknown]" is not assignable to type "float | None"
+      Type "Column[Unknown]" is not assignable to type "float | None"
+        "Column[Unknown]" is not assignable to "float"
+        "Column[Unknown]" is not assignable to "None" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/progress_update_service.py:126:28 - error: Argument of type "Column[date]" cannot be assigned to parameter "proposed_start" of type "date | None" in function "detect_schedule_conflicts"
+    Type "Column[date]" is not assignable to type "date | None"
+      "Column[date]" is not assignable to "date"
+      "Column[date]" is not assignable to "None" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/progress_update_service.py:127:29 - error: Argument of type "Column[date]" cannot be assigned to parameter "proposed_finish" of type "date | None" in function "detect_schedule_conflicts"
+    Type "Column[date]" is not assignable to type "date | None"
+      "Column[date]" is not assignable to "date"
+      "Column[date]" is not assignable to "None" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/progress_update_service.py:171:28 - error: Argument of type "Column[str]" cannot be assigned to parameter "project_id" of type "str" in function "record_schedule_audit"
+    "Column[str]" is not assignable to "str" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/progress_update_service.py:172:29 - error: Argument of type "Column[str]" cannot be assigned to parameter "activity_id" of type "str" in function "record_schedule_audit"
+    "Column[str]" is not assignable to "str" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/progress_update_service.py:173:26 - error: Argument of type "Column[str]" cannot be assigned to parameter "event_id" of type "str" in function "record_schedule_audit"
+    "Column[str]" is not assignable to "str" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/progress_update_service.py:174:27 - error: Argument of type "Column[str]" cannot be assigned to parameter "report_id" of type "str | None" in function "record_schedule_audit"
+    Type "Column[str]" is not assignable to type "str | None"
+      "Column[str]" is not assignable to "str"
+      "Column[str]" is not assignable to "None" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/progress_update_service.py:177:33 - error: Argument of type "Column[str]" cannot be assigned to parameter "system_decision" of type "str" in function "record_schedule_audit"
+    "Column[str]" is not assignable to "str" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/progress_update_service.py:178:28 - error: Argument of type "Column[Unknown]" cannot be assigned to parameter "confidence" of type "float" in function "record_schedule_audit"
+    "Column[Unknown]" is not assignable to "float" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/progress_update_service.py:180:33 - error: Argument of type "Column[str]" cannot be assigned to parameter "matcher_version" of type "str" in function "record_schedule_audit"
+    "Column[str]" is not assignable to "str" (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/app/services/progress_update_service.py:181:40 - error: Argument of type "Column[str]" cannot be assigned to parameter "scoring_policy_version" of type "str" in function "record_schedule_audit"
+    "Column[str]" is not assignable to "str" (reportArgumentType)
+/Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/tests/test_candidate_generation.py
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/tests/test_candidate_generation.py:164:39 - error: Argument of type "Column[Unknown]" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Column[Unknown]" is not assignable to type "ConvertibleToFloat"
+      "Column[Unknown]" is not assignable to "str"
+      "Column[Unknown]" is incompatible with protocol "Buffer"
+        "__buffer__" is not present
+      "Column[Unknown]" is incompatible with protocol "SupportsFloat"
+        "__float__" is not present
+      "Column[Unknown]" is incompatible with protocol "SupportsIndex"
+        "__index__" is not present (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/backend/tests/test_candidate_generation.py:164:76 - error: Argument of type "Column[Unknown]" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Column[Unknown]" is not assignable to type "ConvertibleToFloat"
+      "Column[Unknown]" is not assignable to "str"
+      "Column[Unknown]" is incompatible with protocol "Buffer"
+        "__buffer__" is not present
+      "Column[Unknown]" is incompatible with protocol "SupportsFloat"
+        "__float__" is not present
+      "Column[Unknown]" is incompatible with protocol "SupportsIndex"
+        "__index__" is not present (reportArgumentType)
+/Users/uday/Desktop/Pragati Setu/PragatiSetu/scripts/evaluate_extraction.py
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/scripts/evaluate_extraction.py:37:26 - error: Argument of type "Unknown | None" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Unknown | None" is not assignable to type "ConvertibleToFloat"
+      Type "None" is not assignable to type "ConvertibleToFloat"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "None" is incompatible with protocol "SupportsFloat"
+          "__float__" is not present
+        "None" is incompatible with protocol "SupportsIndex"
+    ... (reportArgumentType)
+  /Users/uday/Desktop/Pragati Setu/PragatiSetu/scripts/evaluate_extraction.py:37:26 - error: Argument of type "Unknown | None" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "Unknown | None" is not assignable to type "ConvertibleToFloat"
+      Type "None" is not assignable to type "ConvertibleToFloat"
+        "None" is not assignable to "str"
+        "None" is incompatible with protocol "Buffer"
+          "__buffer__" is not present
+        "None" is incompatible with protocol "SupportsFloat"
+          "__float__" is not present
+        "None" is incompatible with protocol "SupportsIndex" (reportArgumentType)
+37 errors, 0 warnings, 0 informations

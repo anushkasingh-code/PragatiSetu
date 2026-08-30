@@ -30,7 +30,9 @@ def get_project_dashboard_summary(project_id: str, db: Session) -> dict:
     human_review_events = decisions_query.filter(MatchDecision.decision == "HUMAN_REVIEW").count()
     unplanned_events = decisions_query.filter(MatchDecision.decision == "UNPLANNED_REVIEW").count()
 
-    conflict_events = db.query(AuditRecord).filter(AuditRecord.project_id == project_id).count()
+    conflict_events = decisions_query.filter(MatchDecision.decision == "CONFLICT_REVIEW").count()
+    ignore_events = decisions_query.filter(MatchDecision.decision == "IGNORE").count()
+    applied_events = db.query(AuditRecord).filter(AuditRecord.project_id == project_id).count()
 
     return {
         "project_id": project.project_id,
@@ -46,5 +48,7 @@ def get_project_dashboard_summary(project_id: str, db: Session) -> dict:
         "human_review_events": human_review_events,
         "unplanned_events": unplanned_events,
         "conflict_events": conflict_events,
+        "ignore_events": ignore_events,
+        "applied_events": applied_events,
         "duplicate_reports": duplicate_reports
     }

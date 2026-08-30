@@ -28,10 +28,10 @@ async def upload_report(
     try:
         is_duplicate, result_payload, report_obj = ingestion_service.ingest_report(
             project_id=project_id,
-            filename=file.filename,
+            filename=file.filename or "unknown",
             content=content,
             report_date_input=report_date,
-            discipline_input=discipline
+            discipline_input=discipline or ""
         )
         return result_payload
 

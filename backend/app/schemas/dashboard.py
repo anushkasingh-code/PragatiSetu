@@ -15,6 +15,8 @@ class ProjectDashboardResponse(BaseModel):
     human_review_events: int
     unplanned_events: int
     conflict_events: int
+    ignore_events: int = 0
+    applied_events: int = 0
     duplicate_reports: int
 
     model_config = ConfigDict(from_attributes=True)

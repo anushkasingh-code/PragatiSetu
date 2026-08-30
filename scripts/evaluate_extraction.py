@@ -32,11 +32,13 @@ def evaluate_ground_truth():
     loc_matches = 0
 
     for _, row in df_ground_truth.iterrows():
-        raw_text = str(row["raw_text"])
-        true_status = str(row.get("status")).strip() if pd.notnull(row.get("status")) else None
-        true_pct = float(row.get("progress_percentage")) if pd.notnull(row.get("progress_percentage")) else None
-        true_id = str(row.get("equipment_or_line_id")).strip() if pd.notnull(row.get("equipment_or_line_id")) else None
-        true_loc = str(row.get("location")).strip() if pd.notnull(row.get("location")) else None
+        row_dict = row.to_dict()
+        raw_text = str(row_dict["raw_text"])
+        true_status = str(row_dict.get("status")).strip() if pd.notnull(row_dict.get("status")) else None
+        true_pct_val = row_dict.get("progress_percentage")
+        true_pct = float(str(true_pct_val)) if pd.notnull(true_pct_val) else None
+        true_id = str(row_dict.get("equipment_or_line_id")).strip() if pd.notnull(row_dict.get("equipment_or_line_id")) else None
+        true_loc = str(row_dict.get("location")).strip() if pd.notnull(row_dict.get("location")) else None
 
         pred_status = extract_status(raw_text)
         pred_pct = extract_percent_complete(raw_text)

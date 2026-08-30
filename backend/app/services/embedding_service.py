@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Any
 
 _MODEL_INSTANCE = None
 _MODEL_LOADED = False
-_SCHEDULE_EMBEDDINGS_CACHE: Dict[str, np.ndarray] = {}
+_SCHEDULE_EMBEDDINGS_CACHE: Dict[str, Any] = {}
 
 def get_embedding_model():
     global _MODEL_INSTANCE, _MODEL_LOADED
@@ -11,7 +11,7 @@ def get_embedding_model():
         return _MODEL_INSTANCE
 
     try:
-        from sentence_transformers import SentenceTransformer
+        from sentence_transformers import SentenceTransformer  # type: ignore
         # Load small 22MB sentence-transformer model on CPU
         _MODEL_INSTANCE = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
     except Exception as e:

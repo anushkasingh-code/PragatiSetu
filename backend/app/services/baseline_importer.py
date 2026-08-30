@@ -46,9 +46,10 @@ class BaselineImporter:
         if "Project" in sheets:
             df_proj = pd.read_excel(file_path, sheet_name="Project")
             for _, row in df_proj.iterrows():
-                proj_id = _normalize_project_id(row["project_id"])
-                proj_name = str(row["name"]).strip()
-                proj_desc = str(row["description"]) if pd.notnull(row.get("description")) else None
+                row_dict = row.to_dict()
+                proj_id = _normalize_project_id(str(row_dict["project_id"]))
+                proj_name = str(row_dict["name"]).strip()
+                proj_desc = str(row_dict["description"]) if pd.notnull(row_dict.get("description")) else None
                 
                 existing_proj = self.db.query(Project).filter(Project.project_id == proj_id).first()
                 if not existing_proj:
@@ -68,8 +69,9 @@ class BaselineImporter:
             df_base_projs["norm_proj_id"] = df_base_projs["project_id"].apply(_normalize_project_id)
             unique_projs = df_base_projs[["norm_proj_id", "project_name"]].drop_duplicates()
             for _, row in unique_projs.iterrows():
-                proj_id = str(row["norm_proj_id"]).strip()
-                proj_name = str(row["project_name"]).strip()
+                row_dict = row.to_dict()
+                proj_id = str(row_dict["norm_proj_id"]).strip()
+                proj_name = str(row_dict["project_name"]).strip()
                 existing_proj = self.db.query(Project).filter(Project.project_id == proj_id).first()
                 if not existing_proj:
                     proj = Project(project_id=proj_id, name=proj_name, description=f"{proj_name} Baseline Project")
@@ -88,11 +90,12 @@ class BaselineImporter:
                 df_wbs = df_wbs.sort_values(by="level")
 
             for _, row in df_wbs.iterrows():
-                wbs_id = str(row["wbs_id"]).strip()
-                proj_id = _normalize_project_id(row["project_id"])
-                parent_id = str(row["parent_wbs_id"]).strip() if pd.notnull(row.get("parent_wbs_id")) and str(row.get("parent_wbs_id")).strip() != "None" else None
-                level = int(row["level"])
-                name = str(row["name"]).strip()
+                row_dict = row.to_dict()
+                wbs_id = str(row_dict["wbs_id"]).strip()
+                proj_id = _normalize_project_id(str(row_dict["project_id"]))
+                parent_id = str(row_dict["parent_wbs_id"]).strip() if pd.notnull(row_dict.get("parent_wbs_id")) and str(row_dict.get("parent_wbs_id")).strip() != "None" else None
+                level = int(float(str(row_dict["level"])))
+                name = str(row_dict["name"]).strip()
 
                 existing_wbs = self.db.query(WBSNode).filter(WBSNode.wbs_id == wbs_id).first()
                 if not existing_wbs:
@@ -114,10 +117,11 @@ class BaselineImporter:
             # Extract WBS nodes from wbs_level_1, wbs_level_2, wbs_level_3 columns
             wbs_nodes_seen = set()
             for _, row in df_base.iterrows():
-                proj_id = _normalize_project_id(row["project_id"])
-                l1 = str(row["wbs_level_1"]).strip() if pd.notnull(row.get("wbs_level_1")) else None
-                l2 = str(row["wbs_level_2"]).strip() if pd.notnull(row.get("wbs_level_2")) else None
-                l3 = str(row["wbs_level_3"]).strip() if pd.notnull(row.get("wbs_level_3")) else None
+                row_dict = row.to_dict()
+                proj_id = _normalize_project_id(str(row_dict["project_id"]))
+                l1 = str(row_dict["wbs_level_1"]).strip() if pd.notnull(row_dict.get("wbs_level_1")) else None
+                l2 = str(row_dict["wbs_level_2"]).strip() if pd.notnull(row_dict.get("wbs_level_2")) else None
+                l3 = str(row_dict["wbs_level_3"]).strip() if pd.notnull(row_dict.get("wbs_level_3")) else None
 
                 if l1 and l1 not in wbs_nodes_seen:
                     wbs_nodes_seen.add(l1)
@@ -147,45 +151,47 @@ class BaselineImporter:
             validate_duplicate_activity_ids(act_ids)
 
             for _, row in df_act.iterrows():
-                act_id = str(row["activity_id"]).strip()
-                proj_id = _normalize_project_id(row["project_id"])
+                row_dict = row.to_dict()
+                act_id = str(row_dict["activity_id"]).strip()
+                proj_id = _normalize_project_id(str(row_dict["project_id"]))
                 
                 # Handle wbs_id
                 wbs_id = None
-                if pd.notnull(row.get("wbs_id")):
-                    wbs_id = str(row.get("wbs_id")).strip()
-                elif pd.notnull(row.get("wbs_level_3")):
-                    wbs_id = str(row.get("wbs_level_3")).strip()
-                elif pd.notnull(row.get("wbs_level_2")):
-                    wbs_id = str(row.get("wbs_level_2")).strip()
+                if pd.notnull(row_dict.get("wbs_id")):
+                    wbs_id = str(row_dict.get("wbs_id")).strip()
+                elif pd.notnull(row_dict.get("wbs_level_3")):
+                    wbs_id = str(row_dict.get("wbs_level_3")).strip()
+                elif pd.notnull(row_dict.get("wbs_level_2")):
+                    wbs_id = str(row_dict.get("wbs_level_2")).strip()
 
-                discipline = str(row["discipline"]).strip()
-                desc_col = "activity_description" if "activity_description" in row else "description"
-                description = str(row[desc_col]).strip()
-                location = str(row["location"]).strip() if pd.notnull(row.get("location")) else None
-                eq_line_id = str(row["equipment_or_line_id"]).strip() if pd.notnull(row.get("equipment_or_line_id")) else None
+                discipline = str(row_dict["discipline"]).strip()
+                desc_col = "activity_description" if "activity_description" in row_dict else "description"
+                description = str(row_dict[desc_col]).strip()
+                location = str(row_dict["location"]).strip() if pd.notnull(row_dict.get("location")) else None
+                eq_line_id = str(row_dict["equipment_or_line_id"]).strip() if pd.notnull(row_dict.get("equipment_or_line_id")) else None
                 
                 # Parse dates
-                p_start = pd.to_datetime(row["planned_start"]).date()
-                p_finish = pd.to_datetime(row["planned_finish"]).date()
+                p_start = pd.to_datetime(row_dict["planned_start"]).date()
+                p_finish = pd.to_datetime(row_dict["planned_finish"]).date()
 
                 # Validate planned dates
                 validate_date_range(p_start, p_finish)
 
                 # Parse actuals & validation
-                pct_col = "planned_percent_complete" if "planned_percent_complete" in row else "percent_complete"
-                pct = float(row.get(pct_col, 0.0))
+                pct_col = "planned_percent_complete" if "planned_percent_complete" in row_dict else "percent_complete"
+                pct_val = row_dict.get(pct_col, 0.0)
+                pct = float(str(pct_val)) if pd.notnull(pct_val) else 0.0
                 if pd.isna(pct):
                     pct = 0.0
                 validate_percent_complete(pct)
 
-                status_col = "baseline_status" if "baseline_status" in row else "status"
-                status = str(row.get(status_col, "NOT_STARTED")).strip()
+                status_col = "baseline_status" if "baseline_status" in row_dict else "status"
+                status = str(row_dict.get(status_col, "NOT_STARTED")).strip()
                 if status not in ("NOT_STARTED", "STARTED", "IN_PROGRESS", "COMPLETED"):
                     status = "NOT_STARTED"
                 validate_status(status)
 
-                pred_id = str(row.get("predecessor_activity_id")).strip() if pd.notnull(row.get("predecessor_activity_id")) and str(row.get("predecessor_activity_id")).strip() not in ("None", "nan") else None
+                pred_id = str(row_dict.get("predecessor_activity_id")).strip() if pd.notnull(row_dict.get("predecessor_activity_id")) and str(row_dict.get("predecessor_activity_id")).strip() not in ("None", "nan") else None
 
                 existing_act = self.db.query(ScheduleActivity).filter(ScheduleActivity.activity_id == act_id).first()
                 if not existing_act:

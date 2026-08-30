@@ -139,7 +139,7 @@ class EventExtractionService:
         if df.empty:
             return events
 
-        for row_idx, row in df.iterrows():
+        for loop_idx, (row_idx, row) in enumerate(df.iterrows()):
             row_dict = row.to_dict()
             
             # Combine text representation from row
@@ -157,7 +157,8 @@ class EventExtractionService:
             percent_complete = extract_percent_complete(text_fragment)
             if percent_complete is None and pd.notnull(row_dict.get("progress_percentage")):
                 try:
-                    pct = float(row_dict.get("progress_percentage"))
+                    pct_val = row_dict.get("progress_percentage")
+                    pct = float(str(pct_val)) if pct_val is not None else 0.0
                     if 0.0 <= pct <= 100.0:
                         percent_complete = pct
                 except ValueError:
@@ -182,7 +183,7 @@ class EventExtractionService:
                 "unit": unit,
                 "source_position": {
                     "type": f"{report.source_type}_ROW",
-                    "row": row_idx + 1
+                    "row": loop_idx + 1
                 },
                 "extraction_method": "STRUCTURED_COLUMN_MAPPING"
             })

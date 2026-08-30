@@ -127,12 +127,19 @@ class ProgressUpdateService:
             proposed_finish=proposed_finish
         )
 
-        # If conflicts exist, flag conflicts and do NOT mutate schedule
+        # If conflicts exist, route to CONFLICT_REVIEW and do NOT mutate schedule
         if conflicts:
+            # Update decision record to CONFLICT_REVIEW so it appears in review queue
+            decision.decision = "CONFLICT_REVIEW"
+            conflict_reason = "; ".join([c["message"] for c in conflicts])
+            existing_reasons = decision.reasons or []
+            existing_reasons.append(f"CONFLICT_REVIEW: {conflict_reason}")
+            decision.reasons = existing_reasons
+            self.db.commit()
             return {
                 "event_id": event.event_id,
                 "activity_id": activity.activity_id,
-                "decision": decision.decision,
+                "decision": "CONFLICT_REVIEW",
                 "applied": False,
                 "already_applied": False,
                 "status": activity.status,

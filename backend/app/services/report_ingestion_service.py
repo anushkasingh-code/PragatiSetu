@@ -23,7 +23,7 @@ class ReportIngestionService:
         filename: str,
         content: bytes,
         report_date_input: Any,
-        discipline_input: str = None
+        discipline_input: str | None = None
     ) -> Tuple[bool, Dict[str, Any], SourceReport]:
         """
         Orchestrates full report validation, duplicate checking, local storage, and database persistence.

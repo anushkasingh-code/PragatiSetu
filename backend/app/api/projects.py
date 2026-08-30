@@ -57,7 +57,7 @@ async def upload_baseline_schedule(project_id: str, file: UploadFile = File(...)
     """
     Uploads an Excel baseline schedule file (.xlsx) and imports WBS nodes and Schedule Activities into the project database.
     """
-    if not file.filename.endswith(".xlsx"):
+    if not file.filename or not file.filename.endswith(".xlsx"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Baseline schedule must be an Excel file with .xlsx extension."

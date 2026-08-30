@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
@@ -30,6 +30,8 @@ def transcribe_uploaded_audio(
     audio_dir = Path(settings.AUDIO_UPLOAD_DIR)
     audio_dir.mkdir(parents=True, exist_ok=True)
     temp_path = audio_dir / f"{file_hash[:12]}_{clean_filename}"
+    
+    trans_record = None
 
     try:
         with open(temp_path, "wb") as f:
@@ -42,7 +44,7 @@ def transcribe_uploaded_audio(
             file_size=file_size,
             status="PROCESSING",
             model_name=getattr(settings, "WHISPER_MODEL_SIZE", "tiny"),
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         db.add(trans_record)
         db.commit()
@@ -70,7 +72,7 @@ def transcribe_uploaded_audio(
         return trans_record
 
     except Exception as e:
-        if 'trans_record' in locals() and trans_record:
+        if trans_record:
             trans_record.status = "FAILED"
             trans_record.error_message = str(e)
             db.commit()
@@ -121,7 +123,7 @@ def process_transcription_to_events(
     file_bytes = trans.transcript.encode("utf-8")
     report_hash = calculate_sha256(file_bytes)
 
-    report_date = trans.created_at.date() if trans.created_at else datetime.utcnow().date()
+    report_date = trans.created_at.date() if trans.created_at else datetime.now(timezone.utc).date()
 
     # Check for existing report or create synthetic SourceReport for voice transcript
     existing_rep = db.query(SourceReport).filter(SourceReport.file_hash == report_hash).first()
@@ -130,7 +132,7 @@ def process_transcription_to_events(
         report_dir.mkdir(parents=True, exist_ok=True)
         stored_path = report_dir / f"{report_hash[:12]}_voice_{trans.transcription_id}.txt"
         with open(stored_path, "w", encoding="utf-8") as f:
-            f.write(trans.transcript)
+            f.write(str(trans.transcript))
 
         rep = SourceReport(
             report_id=f"REP-VOICE-{trans.transcription_id}",
@@ -155,7 +157,7 @@ def process_transcription_to_events(
         report_id = existing_rep.report_id
 
     extraction_service = EventExtractionService(db)
-    updated_rep, events = extraction_service.extract_events_from_report(report_id)
+    updated_rep, events = extraction_service.extract_events_from_report(str(report_id))
 
     event_responses = [ExtractedEventResponse.model_validate(evt) for evt in events]
 
