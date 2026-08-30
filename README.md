@@ -1,160 +1,807 @@
-# PragatiSetu — Field Report Ingestion & Schedule Alignment Engine
+# Pragati Setu
 
-> **IMPORTANT DISCLAIMER**: The dataset supplied and used in this project is entirely **SYNTHETIC** development/evaluation ground truth. It is **NOT** real Oil India Limited data.
+### Intelligent Data Capture & Schedule-Linking Layer for Infrastructure Project Management
 
-PragatiSetu bridges structured project baseline schedules with field/site progress reports. This repository provides a standalone, clean, modular, and local-first FastAPI backend with a complete REST API contract and local speech-to-text voice input integration.
+> **Smart India Hackathon 2026 — SIH26122**
 
----
-
-## 🛠️ Technology Stack
-- **Language**: Python 3.10+
-- **API Framework**: FastAPI, Pydantic v2
-- **Database**: PostgreSQL (Production/Docker), SQLite (Local standalone option), SQLAlchemy ORM
-- **Migrations**: Alembic (`001` through `007_add_transcriptions`)
-- **Speech-to-Text**: `faster-whisper` / `whisper` (`tiny`/`base` loaded once on CPU with singleton model caching)
-- **Data Engineering**: Pandas, Openpyxl
-- **Event Extraction & Normalization**: Lightweight Rule-Based Engine & Dictionary Mapper (`05_activity_terminology_dictionary.xlsx`, `06_identifier_normalization_dictionary.xlsx`)
-- **Fuzzy & Semantic Matching**: RapidFuzz string similarity & SentenceTransformers (`all-MiniLM-L6-v2` loaded once on CPU with cached embeddings)
-- **Safety Routing Engine**: Deterministic 85/70/12 threshold policy router (`AUTO_LINK`, `HUMAN_REVIEW`, `UNPLANNED_REVIEW`, `IGNORE`)
-- **Human Planner Review**: Controlled human override API (`ACCEPT`, `SWITCH`, `REJECT`, `UNPLANNED`)
-- **State Validation & Progress Engine**: Atomic schedule actuals updater, conflict detector, and immutable JSON-snapshot audit trail logger
-- **Security & Integrity**: SHA-256 file hashing & path-traversal sanitization
-- **Testing**: Pytest (158 automated test cases)
+An AI-powered system that bridges the gap between **planned project schedules** and **actual site execution** by automatically converting unstructured field updates into structured project activities and intelligently mapping them to the correct **L5/L6 schedule activities**.
 
 ---
 
-## 📁 Repository Structure
+## 📌 Problem Statement
 
-```
-PragatiSetu/
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   │   ├── projects.py             # Baseline schedule & activity APIs
-│   │   │   ├── reports.py              # Report upload & retrieval APIs
-│   │   │   ├── events.py               # Event extraction & matching APIs
-│   │   │   ├── candidates.py           # Event normalization & candidate generation APIs
-│   │   │   ├── decisions.py            # Safety decision routing & explanation APIs
-│   │   │   ├── apply.py                # Schedule progress update & audit APIs
-│   │   │   ├── reviews.py              # Human review decision APIs
-│   │   │   ├── dashboard.py            # Real database metrics dashboard API
-│   │   │   ├── timeline.py             # Gantt timeline data API
-│   │   │   ├── audit.py                # Global/filtered audit log query API
-│   │   │   ├── voice.py                # Spoken voice audio STT & transcript processing APIs
-│   │   │   └── placeholders.py         # System metrics & contract APIs
-│   │   ├── db/
-│   │   │   ├── models/                 # Project, WBSNode, ScheduleActivity, SourceReport, ExtractedEvent, MatchCandidate, MatchDecision, AuditRecord, Transcription
-│   │   │   └── database.py             # SQLAlchemy engine & session dependency
-│   │   ├── schemas/                    # Pydantic request/response schemas
-│   │   ├── services/
-│   │   │   ├── baseline_importer.py    # Baseline schedule Excel importer
-│   │   │   ├── file_validator.py       # Format, size, schema & discipline validator
-│   │   │   ├── audio_validator.py      # Audio format, size limit & filename sanitization validator
-│   │   │   ├── hash_service.py         # SHA-256 hash service
-│   │   │   ├── storage_service.py      # Local disk storage & sanitization
-│   │   │   ├── text_segmenter.py       # Multi-event text segmentation service
-│   │   │   ├── field_extractors.py     # Regex field extractors
-│   │   │   ├── report_ingestion_service.py # Report ingestion orchestrator
-│   │   │   ├── event_extraction_service.py # Event extraction engine
-│   │   │   ├── normalizer_service.py   # Identifier, terminology & location normalizer
-│   │   │   ├── embedding_service.py    # SentenceTransformers embedding manager & cache
-│   │   │   ├── transcription_service.py# Singleton local CPU-first Whisper STT service
-│   │   │   ├── voice_service.py        # Voice transcription & pipeline integration service
-│   │   │   ├── candidate_scorer.py     # 8-component evidence scorer & weighted heuristic model
-│   │   │   ├── candidate_generator_service.py # Candidate shortlist generator & ranker
-│   │   │   ├── evidence_service.py     # Evidence completeness calculator & reason builder
-│   │   │   ├── decision_policy.py      # Safety threshold policy router (85/70/12)
-│   │   │   ├── decision_service.py     # Safety decision orchestrator
-│   │   │   ├── state_validator.py      # Status transition & date order validator
-│   │   │   ├── conflict_service.py     # Conflict detection engine
-│   │   │   ├── audit_service.py        # Immutable audit trail builder
-│   │   │   ├── progress_update_service.py # Atomic schedule progress update service
-│   │   │   ├── dashboard_service.py    # Real database counts dashboard service
-│   │   │   ├── human_review_service.py # Human review decision service
-│   │   │   └── timeline_service.py     # Timeline Gantt data service
-│   │   ├── config.py                   # Environment settings
-│   │   └── main.py                     # FastAPI app entrypoint, CORS & error handlers
-│   ├── alembic/                        # Alembic database migrations (001 through 007_add_transcriptions)
-│   ├── tests/                          # Pytest test suite (158 tests)
-│   ├── alembic.ini                     # Alembic configuration
-│   └── requirements.txt                # Lightweight dependencies
-├── dataset/                            # Synthetic evaluation package (10 files)
-├── uploads/                            # Safe local storage directory for uploaded reports & audio (.gitignore)
-├── scripts/
-│   ├── generate_synthetic_dataset.py  # Dataset generator
-│   ├── inspect_datasets.py            # Programmatic dataset inspector
-│   ├── import_baseline.py             # Baseline schedule importer
-│   ├── evaluate_extraction.py         # Event extraction evaluation script
-│   ├── evaluate_resolver.py           # Candidate generation evaluation script
-│   └── evaluate_decisions.py          # Decision routing evaluation script
-├── docs/
-│   ├── ARCHITECTURE.md                 # System architecture overview
-│   ├── REPORT_INGESTION.md             # Report ingestion & validation specification
-│   ├── EVENT_EXTRACTION.md             # Event extraction specification
-│   ├── RESOLVER.md                     # Event normalization & candidate generation specification
-│   ├── DECISION_POLICY.md             # Safety decision routing policy specification
-│   ├── STATE_PROGRESS_AUDIT.md        # State progress update & audit trail specification
-│   ├── FRONTEND_API_CONTRACT.md       # Frontend developer REST API specification
-│   ├── VOICE.md                        # Local CPU-first Speech-to-Text STT specification
-│   └── API.md                          # REST API documentation summary
-├── Dockerfile                          # Standalone Backend Dockerfile
-├── docker-compose.yml                  # Docker Compose setup (Backend + PostgreSQL)
-└── README.md
+Large infrastructure projects are typically planned and monitored using structured project-management tools such as **Primavera P6** and **Microsoft Project**.
+
+However, actual site progress is often reported through:
+
+- Daily Progress Reports (DPRs)
+- Site diaries
+- Excel spreadsheets
+- PDFs
+- Free-text updates
+- Supervisor observations
+- Voice-based updates
+
+The language and level of detail used in these reports often differ significantly from the terminology and structure used in the official project schedule.
+
+### Example
+
+#### Planned Schedule
+
+```text
+Activity ID: PIP-204-017
+Activity: Erect 24-inch Pipeline Section A
+Discipline: Piping
+Planned Start: 12-Aug-2026
+Planned Finish: 17-Aug-2026
 ```
 
----
+#### Site Report
 
-## 🚀 Quickstart Guide
+```text
+"24 inch line spool erection completed today."
+```
 
-### Option 1: Native Python Setup
+The site report does not explicitly mention the Activity ID.
 
-1. **Install Dependencies**:
-   ```bash
-   pip install -r backend/requirements.txt
-   ```
-
-2. **Run Database Migrations**:
-   ```bash
-   python -m alembic -c backend/alembic.ini upgrade head
-   ```
-
-3. **Import Project Alpha Baseline Schedule (75 Activities)**:
-   ```bash
-   python scripts/import_baseline.py
-   ```
-
-4. **Start FastAPI Application Server**:
-   ```bash
-   uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
-   ```
-   Open Swagger API Docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-
-5. **Run Pytest Test Suite (158 Tests including Full Integration & Voice Tests)**:
-   ```bash
-   python -m pytest backend/tests -v
-   ```
+The challenge is to automatically understand the field update and determine which planned **L5/L6 activity** it corresponds to.
 
 ---
 
-## 🎯 Completed Scope 
+# 💡 Our Solution
 
-- [x] Product Naming: **PragatiSetu**
-- [x] Standalone FastAPI REST API architecture with CORS & standardized error handlers
-- [x] SQLAlchemy ORM models (`Project`, `WBSNode`, `ScheduleActivity`, `SourceReport`, `ExtractedEvent`, `MatchCandidate`, `MatchDecision`, `AuditRecord`, `Transcription`)
-- [x] Alembic migrations (`001_initial_schema` through `007_add_transcriptions`)
-- [x] Multi-Format Field Report Ingestor (`TXT`, `CSV`, `XLSX`) with SHA-256 duplicate detection
-- [x] Local CPU-First Speech-To-Text Transcribe Engine (`faster-whisper` / `whisper` `tiny`/`base` model loaded once on startup)
-- [x] Spoken Voice Audio Ingestion API (`POST /voice/transcribe`, `PATCH /transcriptions/{id}`, `POST /voice/process`)
-- [x] Multi-Event Segmentation & Extraction Engine
-- [x] Event Normalization Engine (`normalizer_service.py` using dataset dictionaries)
-- [x] Candidate Generator & 8 Component Evidence Signals (`identifier`, `discipline`, `location`, `action`, `fuzzy`, `semantic`, `temporal`, `dependency`)
-- [x] SentenceTransformers Embedding Manager with in-memory schedule activity vector caching
-- [x] Safety Decision Policy Router (85/70/12 thresholds) with controlled enum (`AUTO_LINK`, `HUMAN_REVIEW`, `UNPLANNED_REVIEW`, `IGNORE`)
-- [x] Human Planner Review API (`ACCEPT`, `SWITCH`, `REJECT`, `UNPLANNED`)
-- [x] Atomic Schedule Actuals Progress Updater with Conflict Detector, Immutability Guarantee for Planned Dates, and Immutable Audit Trail Logger
-- [x] Real Database Dashboard Summary Metrics API (`GET /projects/{id}/dashboard`)
-- [x] Gantt Timeline Data API (`GET /projects/{id}/timeline`)
-- [x] Global & Filtered Audit Trail Query API (`GET /audit`)
-- [x] Standardized API Contract documentation for Frontend Developers (`docs/FRONTEND_API_CONTRACT.md`) and STT documentation (`docs/VOICE.md`)
-- [x] 100% Passing Pytest test suite (158 automated test cases including full end-to-end integration & voice STT tests)
-- [x] Dockerfile & docker-compose configuration
+We propose an **AI-powered Planning-to-Execution Bridge** that transforms unstructured site information into structured, schedule-linked project updates.
+
+```text
+                    ┌──────────────────────┐
+                    │   Project Schedule   │
+                    │ Primavera / MS       │
+                    │ Project / Excel      │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                     ┌─────────────────┐
+                     │ Schedule Parser │
+                     └────────┬────────┘
+                              │
+                              ▼
+                    L5/L6 Activity Database
+                              │
+                              │
+                              │
+┌─────────────────┐           │
+│   Site Reports  │           │
+│ PDF / Excel     │           │
+│ Text / Voice    │           │
+└────────┬────────┘           │
+         │                    │
+         ▼                    │
+┌─────────────────┐           │
+│ Data Extraction │           │
+│      LLM        │           │
+└────────┬────────┘           │
+         │                    │
+         ▼                    │
+┌─────────────────────────────┐
+│ Structured Execution Event  │
+└──────────────┬──────────────┘
+               │
+               ▼
+       Semantic Retrieval
+          + Embeddings
+               │
+               ▼
+      Top Candidate Activities
+               │
+               ▼
+       Validation & Reranking
+               │
+               ▼
+        Confidence Scoring
+          ┌────┴────┐
+          │         │
+       High       Low
+          │         │
+          ▼         ▼
+     Auto Update  Human Review
+          │         │
+          └────┬────┘
+               ▼
+        Updated Project View
+               │
+               ▼
+       Gantt / Progress / Alerts
+```
+
+---
+
+# 🎯 Objectives
+
+The system aims to:
+
+1. Automatically extract meaningful execution events from field reports.
+2. Understand construction and infrastructure terminology.
+3. Map field observations to the correct L5/L6 schedule activities.
+4. Handle differences in terminology and granularity.
+5. Assign confidence scores to AI-generated mappings.
+6. Route ambiguous cases to human reviewers.
+7. Maintain an auditable history of every AI-generated update.
+8. Reduce manual effort involved in progress tracking.
+9. Provide near-real-time visibility of project execution against the plan.
+
+---
+
+# 🧠 Key Concept: L5 and L6 Activities
+
+Infrastructure projects use hierarchical **Work Breakdown Structures (WBS)**.
+
+A simplified structure may look like:
+
+```text
+Project
+│
+├── Pipeline Construction
+│   │
+│   ├── Section A
+│   │   │
+│   │   └── Pipeline Installation
+│   │       │
+│   │       ├── L5: Install 24-inch Pipeline
+│   │       │    │
+│   │       │    ├── L6: Spool P-204-07
+│   │       │    ├── L6: Spool P-204-08
+│   │       │    └── L6: Spool P-204-09
+│   │       │
+│   │       └── L5: Pipeline Welding
+│   │            │
+│   │            ├── L6: Joint 101
+│   │            ├── L6: Joint 102
+│   │            └── L6: Joint 103
+```
+
+The system's primary task is to connect a field observation to the appropriate scheduled activity.
+
+---
+
+# 🔍 Example Workflow
+
+### Input
+
+A supervisor submits:
+
+```text
+"Spool P204-07 erection completed today.
+Welding for Section B started."
+```
+
+### Step 1 — Information Extraction
+
+The LLM converts the report into structured events:
+
+```json
+[
+  {
+    "equipment": "P204-07",
+    "activity": "spool erection",
+    "status": "COMPLETED",
+    "date": "2026-08-30"
+  },
+  {
+    "section": "B",
+    "activity": "welding",
+    "status": "STARTED",
+    "date": "2026-08-30"
+  }
+]
+```
+
+### Step 2 — Semantic Retrieval
+
+The system searches the schedule for matching activities.
+
+```text
+Candidate Activities
+
+1. PIP-204-017
+   Spool P204-07 Erection
+   Similarity: 0.95
+
+2. PIP-204-021
+   Spool P204-08 Erection
+   Similarity: 0.71
+
+3. PIP-204-025
+   Section B Welding
+   Similarity: 0.68
+```
+
+### Step 3 — Validation
+
+The system evaluates:
+
+- Activity description
+- Equipment/asset identifiers
+- Discipline
+- WBS context
+- Date compatibility
+- Location/section
+- Semantic similarity
+
+### Step 4 — Confidence Decision
+
+```text
+Confidence: 95%
+Status: HIGH CONFIDENCE
+Action: Auto-update
+```
+
+For an ambiguous case:
+
+```text
+Confidence: 61%
+Status: LOW CONFIDENCE
+Action: Human Review Required
+```
+
+---
+
+# 🏗️ System Architecture
+
+## 1. Data Ingestion Layer
+
+Supports multiple sources:
+
+```text
+PDF
+Excel
+CSV
+Text
+Site Diary
+Voice
+```
+
+The ingestion layer converts these inputs into a common internal representation.
+
+---
+
+## 2. Schedule Processing
+
+Project schedules are converted into structured activity records.
+
+Example:
+
+```json
+{
+  "activity_id": "PIP-204-017",
+  "wbs_level": "L6",
+  "activity_name": "Erect 24-inch Pipeline Section A",
+  "discipline": "Piping",
+  "planned_start": "2026-08-12",
+  "planned_finish": "2026-08-17"
+}
+```
+
+---
+
+## 3. AI Information Extraction
+
+An LLM extracts:
+
+- Activity/event
+- Equipment
+- Location
+- Discipline
+- Status
+- Progress
+- Dates
+- Quantities
+- Remarks
+
+The model produces structured output rather than directly modifying the schedule.
+
+---
+
+## 4. Semantic Matching
+
+The extracted event is converted into an embedding.
+
+The system then searches the schedule activity database for semantically similar activities.
+
+```text
+Field Update
+     │
+     ▼
+Embedding
+     │
+     ▼
+Vector Search
+     │
+     ▼
+Top-K Activities
+```
+
+This allows the system to handle different wording.
+
+### Example
+
+```text
+"24 inch line erection completed"
+
+                ≈
+
+"Erect 24-inch Pipeline Section A"
+```
+
+even though the wording is not identical.
+
+---
+
+## 5. Context-Aware Validation
+
+Semantic similarity alone is not sufficient.
+
+The system combines:
+
+```text
+Semantic Similarity
+        +
+Equipment ID
+        +
+Discipline
+        +
+Location
+        +
+WBS Context
+        +
+Date
+        +
+Schedule Dependencies
+```
+
+to improve matching reliability.
+
+---
+
+## 6. Confidence & Human-in-the-Loop
+
+The system never blindly trusts AI output.
+
+### High Confidence
+
+```text
+Confidence ≥ Threshold
+
+        ↓
+
+Automatic Update
+```
+
+### Low Confidence
+
+```text
+Confidence < Threshold
+
+        ↓
+
+Human Review Queue
+```
+
+The reviewer can:
+
+- Approve
+- Reject
+- Select another activity
+- Mark as unmatched
+
+---
+
+# 🛡️ Safety & Reliability
+
+A core design principle is:
+
+> **The AI must never invent a schedule activity.**
+
+The system can only:
+
+1. Match against existing schedule activities.
+2. Mark an event as unmatched.
+3. Request human intervention.
+
+This prevents hallucinated Activity IDs and incorrect schedule modifications.
+
+---
+
+# 🔄 Handling Difficult Cases
+
+## Similar Activities
+
+```text
+Install Pump P-204
+Install Pump P-205
+Install Pump P-206
+```
+
+If the report only says:
+
+> "Pump installation completed."
+
+The system should not guess.
+
+Instead:
+
+```text
+⚠️ Ambiguous Match
+
+Multiple possible activities found.
+
+Human Review Required.
+```
+
+---
+
+## Unmatched Activity
+
+If a report contains:
+
+> "Temporary access road constructed."
+
+but no corresponding schedule activity exists:
+
+```text
+⚠️ No Matching Activity
+
+Event:
+Temporary access road construction
+
+Action:
+Planner Review
+```
+
+---
+
+## Conflicting Reports
+
+If two reports provide contradictory information:
+
+```text
+Supervisor A:
+Welding completed.
+
+Supervisor B:
+Welding 80% complete.
+```
+
+the system flags:
+
+```text
+⚠️ Conflicting Progress Reports
+
+Human verification required.
+```
+
+---
+
+# 📊 Proposed Technology Stack
+
+| Component | Technology |
+|---|---|
+| Frontend | React / Next.js |
+| Backend | Python / FastAPI |
+| LLM | Gemini / GPT-class API |
+| Embeddings | BGE-M3 |
+| Vector Search | FAISS |
+| Database | PostgreSQL |
+| Document Processing | Python |
+| OCR | PaddleOCR / Tesseract |
+| Speech-to-Text | Whisper |
+| Visualization | Gantt / Timeline UI |
+| Deployment | Docker |
+
+> The exact model/provider can be changed depending on API availability, latency, cost and deployment requirements.
+
+---
+
+# 📁 Dataset Strategy
+
+The prototype dataset will consist of three primary components.
+
+## Schedule Dataset
+
+```text
+activity_id
+wbs_level
+activity_name
+discipline
+location
+equipment
+planned_start
+planned_finish
+dependencies
+```
+
+## Field Report Dataset
+
+```text
+report_id
+report_date
+supervisor
+discipline
+raw_text
+source
+```
+
+## Ground Truth Dataset
+
+```text
+report_id
+expected_activity_id
+event_type
+status
+confidence_label
+```
+
+---
+
+# 🧪 Evaluation
+
+The system will be evaluated using labelled field-report/activity pairs.
+
+## Activity Matching
+
+- Top-1 Accuracy
+- Top-3 Accuracy
+- Precision
+- Recall
+- F1 Score
+
+## Information Extraction
+
+Evaluate extraction of:
+
+- Activity
+- Equipment
+- Status
+- Date
+- Progress
+- Location
+
+## Safety Metrics
+
+Measure:
+
+- False Matches
+- Unmatched Detection
+- Human Review Rate
+- Incorrect Auto-Updates
+
+A key objective is to **minimize false activity mappings**, because an incorrect schedule update can be more harmful than requesting human review.
+
+---
+
+# 📈 Expected Benefits
+
+The proposed system can help project teams:
+
+- Reduce manual progress-entry effort.
+- Improve schedule-to-execution visibility.
+- Reduce delays between site reporting and schedule updates.
+- Identify unmatched or unexpected work.
+- Detect conflicting progress information.
+- Improve data consistency.
+- Provide an auditable AI-assisted workflow.
+- Enable project managers to focus on exceptions instead of routine data entry.
+
+---
+
+# 👥 Human-in-the-Loop Design
+
+The system is designed as an **AI assistant**, not an autonomous project manager.
+
+```text
+             AI
+              │
+              ▼
+      Recommendation
+              │
+              ▼
+      Confidence Score
+              │
+        ┌─────┴─────┐
+        │           │
+      Clear      Ambiguous
+        │           │
+        ▼           ▼
+    Auto/Quick    Human
+     Approval     Review
+        │           │
+        └─────┬─────┘
+              ▼
+       Schedule Update
+```
+
+This provides both automation and human control.
+
+---
+
+# 🚀 MVP Scope
+
+The initial prototype focuses on the most important workflow:
+
+```text
+Excel Schedule
+      +
+Text Field Report
+      ↓
+AI Extraction
+      ↓
+Semantic Activity Matching
+      ↓
+Confidence Score
+      ↓
+Human Approval
+      ↓
+Updated Gantt / Progress View
+```
+
+### Phase 2
+
+- PDF processing
+- OCR
+- Voice input
+- Multilingual reports
+- Advanced progress estimation
+- Conflict detection
+- Historical analytics
+
+### Phase 3
+
+- Primavera/MS Project integration
+- Enterprise PMIS integration
+- Real-time notifications
+- Project-level analytics
+- Continuous terminology learning
+
+---
+
+# 🗺️ Future Scope
+
+The platform can be extended into a broader infrastructure execution intelligence system.
+
+Potential capabilities include:
+
+- Delay-risk detection
+- Progress forecasting
+- Automated daily progress summaries
+- Contractor performance analytics
+- Resource bottleneck detection
+- Schedule variance analysis
+- Automated management reports
+- Multi-project portfolio monitoring
+- Conversational project queries
+
+### Example
+
+> **"Which activities are behind schedule in Section B?"**
+
+The system could respond using the latest validated project data.
+
+---
+
+# 🔐 Design Principles
+
+### 1. AI-Assisted, Human-Controlled
+
+AI recommends; humans retain authority over important schedule changes.
+
+### 2. Evidence-Based Updates
+
+Every AI-generated update should be traceable to its source report.
+
+### 3. No Hallucinated Activities
+
+The AI cannot create arbitrary schedule IDs.
+
+### 4. Confidence-Aware Automation
+
+Only sufficiently reliable matches should be automatically processed.
+
+### 5. Auditable
+
+Every mapping and modification should have:
+
+```text
+Source
+Timestamp
+Activity ID
+AI Decision
+Confidence
+Reviewer
+Final Action
+```
+
+---
+
+# 🎯 Project Vision
+
+> **Bridge the gap between what the project schedule says should happen and what the site reports actually say happened.**
+
+Our goal is to transform project monitoring from:
+
+```text
+Site Report
+     ↓
+Manual Reading
+     ↓
+Manual Mapping
+     ↓
+Manual Schedule Update
+     ↓
+Delayed Visibility
+```
+
+into:
+
+```text
+Site Report
+     ↓
+AI Understanding
+     ↓
+Semantic Schedule Matching
+     ↓
+Confidence Validation
+     ↓
+Human Approval
+     ↓
+Near-Real-Time Project Visibility
+```
+
+---
+
+# 🏆 Smart India Hackathon 2026
+
+| Detail | Information |
+|---|---|
+| Problem Statement | **SIH26122** |
+| Theme | **Smart Automation** |
+| Category | **Software** |
+| Organization | **Oil India Limited** |
+
+---
+
+# 📜 Disclaimer
+
+This repository contains a prototype implementation developed for **Smart India Hackathon 2026**.
+
+Demonstration datasets may be synthetic and are intended to reproduce the structure and challenges of real infrastructure project-management data.
+
+The prototype should not be considered a replacement for official project-management systems or professional project controls without appropriate validation, security controls and enterprise integration.
+
+---
+
+# ⭐ Key Takeaway
+
+**SIH26122 is not simply an AI chatbot.**
+
+The core innovation is the reliable transformation:
+
+```text
+Unstructured Site Information
+             ↓
+      Structured Events
+             ↓
+     L5/L6 Schedule Mapping
+             ↓
+      Confidence Validation
+             ↓
+       Human Approval
+             ↓
+       Schedule Update
+```
+
+The primary objective is to create a trustworthy **Planning-to-Execution Bridge** for large infrastructure projects.
+
+---
+
+## 📌 Built for Smart India Hackathon 2026
+
+**SIH26122 · Oil India Limited · Smart Automation**
