@@ -1,5 +1,7 @@
 # Local storage uploads directory
 uploads/
+vector_store/
+.chroma/
 *.db
 *.sqlite3
 

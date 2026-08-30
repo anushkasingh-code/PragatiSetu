@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     EVIDENCE_COMPLETENESS_THRESHOLD: float = float(os.getenv("EVIDENCE_COMPLETENESS_THRESHOLD", "70.0"))
     TOP2_MARGIN_THRESHOLD: float = float(os.getenv("TOP2_MARGIN_THRESHOLD", "12.0"))
 
+    # Vector DB Configuration (ChromaDB)
+    VECTOR_DB_DIR: str = os.getenv("VECTOR_DB_DIR", "vector_store")
+    VECTOR_COLLECTION_NAME: str = os.getenv("VECTOR_COLLECTION_NAME", "pragatisetu_activities")
+
+    # Optional Groq LLM Configuration
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    GROQ_ENABLED: bool = os.getenv("GROQ_ENABLED", "false").lower() in ("true", "1", "yes")
+
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
 
 settings = Settings()

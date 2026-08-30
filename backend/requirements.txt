@@ -11,6 +11,8 @@ pytest>=7.0.0
 httpx>=0.24.0
 rapidfuzz>=3.0.0
 sentence-transformers>=2.2.0
+chromadb>=0.4.0
+groq>=0.4.0
 # Optional – local voice STT (CPU-compatible):
 # faster-whisper>=1.0.0
 # Optional – PostgreSQL production database (SQLite used by default):

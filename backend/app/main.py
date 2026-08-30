@@ -18,6 +18,7 @@ from backend.app.api.timeline import router as timeline_router
 from backend.app.api.audit import router as audit_router
 from backend.app.api.placeholders import router as placeholders_router
 from backend.app.api.voice import router as voice_router
+from backend.app.api.ai import router as ai_router
 
 # Configure Application Logging
 log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
@@ -100,6 +101,7 @@ app.include_router(timeline_router, prefix=settings.API_V1_STR)
 app.include_router(audit_router, prefix=settings.API_V1_STR)
 app.include_router(placeholders_router, prefix=settings.API_V1_STR)
 app.include_router(voice_router, prefix=settings.API_V1_STR)
+app.include_router(ai_router, prefix=settings.API_V1_STR)
 
 @app.get("/health", tags=["Health"])
 def health_check(db: Session = Depends(get_db)):
