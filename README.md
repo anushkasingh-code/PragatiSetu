@@ -487,7 +487,7 @@ Human verification required.
 |---|---|
 | Frontend | React / Next.js |
 | Backend | Python / FastAPI |
-| LLM | Gemini / GPT-class API |
+| LLM | Groq API |
 | Embeddings | BGE-M3 |
 | Vector Search | FAISS |
 | Database | PostgreSQL |
