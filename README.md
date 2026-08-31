@@ -1,4 +1,4 @@
-# Pragati Setu
+# PragatiSetu
 
 ### Intelligent Data Capture & Schedule-Linking Layer for Infrastructure Project Management
 

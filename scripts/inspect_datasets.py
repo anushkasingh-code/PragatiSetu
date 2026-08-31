@@ -24,7 +24,7 @@ md_files = [
 ]
 
 lines = []
-lines.append("# Site2Schedule AI — Ground Truth Dataset Schema Documentation\n")
+lines.append("# PragatiSetu — Ground Truth Dataset Schema Documentation\n")
 lines.append("> **IMPORTANT NOTICE**: This dataset is entirely **SYNTHETIC** development/evaluation ground truth. It is NOT real Oil India Limited data.\n")
 lines.append("## Dataset Overview\n")
 lines.append("- **Project Alpha**: 75 baseline schedule activities, 400 labelled field events (280 dev, 60 val, 60 test).")
