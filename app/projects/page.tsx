@@ -1,12 +1,37 @@
+'use client';
+
+import { apiFetch } from '@/lib/api';
 import { Folder, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
+
+const FALLBACK_PROJECTS = [
+  { name: 'Project Alpha', code: '24P201', status: 'Operational', progress: 68.2 },
+  { name: 'Project Beta', code: '24P305', status: 'Planning', progress: 12.5 },
+  { name: 'Project Gamma', code: '23P890', status: 'Completed', progress: 100 },
+];
 
 export default function Projects() {
-  const projects = [
-    { name: 'Project Alpha', code: '24P201', status: 'Operational', progress: 68.2 },
-    { name: 'Project Beta', code: '24P305', status: 'Planning', progress: 12.5 },
-    { name: 'Project Gamma', code: '23P890', status: 'Completed', progress: 100 },
-  ];
+  const [projects, setProjects] = useState(FALLBACK_PROJECTS);
+
+  useEffect(() => {
+    apiFetch<{ project_id: string; name: string; description?: string; created_at?: string; status?: string; progress_percentage?: number }[]>('/projects')
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setProjects(
+            data.map((p) => ({
+              name: p.name,
+              code: p.project_id,
+              status: p.status ?? 'N/A',
+              progress: p.progress_percentage ?? 0,
+            }))
+          );
+        }
+      })
+      .catch(() => {
+        // fetch failed — keep fallback
+      });
+  }, []);
 
   return (
     <div className="p-6 max-w-7xl mx-auto w-full">
@@ -39,7 +64,7 @@ export default function Projects() {
               </div>
             </div>
 
-            <Link href="/" className="w-full py-2 bg-surface-container-low hover:bg-surface-container-high border border-surface-border rounded-lg text-[13px] font-bold text-on-surface flex items-center justify-center gap-2 transition-colors">
+            <Link href={`/?project_id=${encodeURIComponent(p.code)}`} className="w-full py-2 bg-surface-container-low hover:bg-surface-container-high border border-surface-border rounded-lg text-[13px] font-bold text-on-surface flex items-center justify-center gap-2 transition-colors">
               Open Dashboard <ArrowRight size={16} />
             </Link>
           </div>

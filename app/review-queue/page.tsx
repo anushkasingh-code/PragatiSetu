@@ -1,21 +1,243 @@
-import { 
-  Filter, 
-  Mic, 
-  BrainCircuit, 
-  CheckCircle2, 
-  AlertTriangle, 
-  Check, 
-  ArrowRightLeft, 
+'use client';
+
+import { apiFetchSafe } from '@/lib/api';
+import { notifyAppDataRefresh, useAppDataRefresh } from '@/lib/app-sync';
+import {
+  FALLBACK_WBS_CODE,
+  getPendingFallbackReviews,
+  resolveFallbackReview,
+  type FallbackReviewRecord,
+} from '@/lib/report-fallback';
+import {
+  Filter,
+  Mic,
+  BrainCircuit,
+  CheckCircle2,
+  AlertTriangle,
+  Check,
+  ArrowRightLeft,
   X,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
 } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useState } from 'react';
+
+type ExtractedEvent = {
+  event_id: string;
+  report_id: string;
+  raw_text: string;
+  action?: string | null;
+  object?: string | null;
+  identifier?: string | null;
+  location?: string | null;
+  status?: string | null;
+};
+
+type MatchDecision = {
+  event_id: string;
+  decision: string;
+  top_activity_id?: string | null;
+  match_confidence: number;
+  reasons?: string[] | null;
+};
+
+type CandidateScore = {
+  activity_id: string;
+  rank: number;
+  overall_score: number;
+};
+
+type Activity = {
+  activity_id: string;
+  description: string;
+  equipment_or_line_id?: string | null;
+};
+
+type ReviewItem = {
+  event: ExtractedEvent;
+  decision: MatchDecision;
+  candidates: CandidateScore[];
+  activities: Record<string, Activity>;
+  isFallback?: boolean;
+};
+
+const PENDING_DECISIONS = new Set(['HUMAN_REVIEW', 'UNPLANNED_REVIEW', 'CONFLICT_REVIEW']);
+
+function fallbackToReviewItem(record: FallbackReviewRecord): ReviewItem {
+  const activities: Record<string, Activity> = {
+    [FALLBACK_WBS_CODE]: {
+      activity_id: FALLBACK_WBS_CODE,
+      description: 'Spool Erection — Rack B Piping Package',
+      equipment_or_line_id: FALLBACK_WBS_CODE,
+    },
+    'PIP-204-018': {
+      activity_id: 'PIP-204-018',
+      description: 'Hydrotest — Rack B Piping Package',
+      equipment_or_line_id: 'PIP-204-018',
+    },
+  };
+
+  return {
+    event: {
+      event_id: record.event_id,
+      report_id: record.report_id,
+      raw_text: record.raw_text,
+      identifier: record.identifier,
+      action: record.action,
+      object: record.object,
+      location: record.location,
+      status: record.status,
+    },
+    decision: {
+      event_id: record.event_id,
+      decision: record.decision,
+      top_activity_id: record.top_activity_id,
+      match_confidence: record.match_confidence,
+      reasons: record.reasons,
+    },
+    candidates: record.candidates,
+    activities,
+    isFallback: true,
+  };
+}
+
+async function fetchPendingReviews(projectId: string): Promise<ReviewItem[]> {
+  const fallbackItems = getPendingFallbackReviews().map(fallbackToReviewItem);
+  const items: ReviewItem[] = [...fallbackItems];
+
+  const reportsResult = await apiFetchSafe<{ report_id: string }[]>(`/projects/${projectId}/reports`);
+  if (!reportsResult.ok) return items;
+
+  for (const report of reportsResult.data) {
+    const eventsResult = await apiFetchSafe<ExtractedEvent[]>(`/reports/${report.report_id}/events`);
+    if (!eventsResult.ok) continue;
+    const events = eventsResult.data;
+
+    for (const event of events) {
+      let decision: MatchDecision | null = null;
+      const decisionResult = await apiFetchSafe<MatchDecision>(`/events/${event.event_id}/decision`);
+      if (decisionResult.ok) {
+        decision = decisionResult.data;
+      } else {
+        const matchResult = await apiFetchSafe<MatchDecision>(`/events/${event.event_id}/match`, {
+          method: 'POST',
+        });
+        if (matchResult.ok) decision = matchResult.data;
+      }
+
+      if (!decision || !PENDING_DECISIONS.has(decision.decision)) continue;
+
+      let candidates: CandidateScore[] = [];
+      const candGet = await apiFetchSafe<{ candidates: CandidateScore[] }>(`/events/${event.event_id}/candidates`);
+      if (candGet.ok) {
+        candidates = candGet.data.candidates ?? [];
+      } else {
+        const candPost = await apiFetchSafe<{ candidates: CandidateScore[] }>(
+          `/events/${event.event_id}/candidates`,
+          { method: 'POST' },
+        );
+        if (candPost.ok) candidates = candPost.data.candidates ?? [];
+      }
+
+      const activities: Record<string, Activity> = {};
+      for (const candidate of candidates.slice(0, 5)) {
+        if (activities[candidate.activity_id]) continue;
+        const actResult = await apiFetchSafe<Activity>(`/activities/${candidate.activity_id}`);
+        if (actResult.ok) activities[candidate.activity_id] = actResult.data;
+      }
+
+      items.push({ event, decision, candidates, activities });
+    }
+  }
+
+  return items;
+}
 
 export default function ReviewQueue() {
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get('project_id') ?? 'PROJ-ALPHA';
+
+  const [items, setItems] = useState<ReviewItem[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadQueue = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const pending = await fetchPendingReviews(projectId);
+      setItems(pending);
+      setCurrentIndex((prev) => (pending.length === 0 ? 0 : Math.min(prev, pending.length - 1)));
+    } catch {
+      const fallbackOnly = getPendingFallbackReviews().map(fallbackToReviewItem);
+      setItems(fallbackOnly);
+      setCurrentIndex(0);
+      if (fallbackOnly.length === 0) {
+        setError('Failed to load review queue.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void loadQueue();
+  }, [loadQueue]);
+
+  useAppDataRefresh(loadQueue);
+
+  const currentItem = items[currentIndex] ?? null;
+  const topCandidate = currentItem?.candidates[0] ?? null;
+  const activeActivityId = selectedActivityId ?? currentItem?.decision.top_activity_id ?? topCandidate?.activity_id ?? null;
+
+  useEffect(() => {
+    setSelectedActivityId(null);
+  }, [currentIndex, currentItem?.event.event_id]);
+
+  const handleDecision = async (decision: 'ACCEPT' | 'REJECT') => {
+    if (!currentItem) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      if (currentItem.isFallback) {
+        resolveFallbackReview(currentItem.event.event_id);
+        notifyAppDataRefresh({ source: 'review-queue' });
+        await loadQueue();
+        return;
+      }
+
+      const result = await apiFetchSafe(`/reviews/${currentItem.event.event_id}/decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          decision,
+          selected_activity_id: decision === 'ACCEPT' ? activeActivityId : undefined,
+          reason: decision === 'ACCEPT' ? 'Planner confirmed match' : 'Planner rejected match',
+        }),
+      });
+
+      if (!result.ok) {
+        setError(`Review action failed: ${result.error}`);
+        return;
+      }
+      await loadQueue();
+    } catch {
+      setError('Failed to submit review decision.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSwitchCandidate = (activityId: string) => {
+    setSelectedActivityId(activityId);
+  };
+
   return (
     <div className="p-6 h-[calc(100vh-4rem)] flex flex-col gap-6 max-w-[1600px] mx-auto w-full">
-      
-      {/* Header */}
       <div className="flex justify-between items-end shrink-0">
         <div>
           <h2 className="text-[24px] font-semibold text-on-surface">Review Queue</h2>
@@ -24,167 +246,230 @@ export default function ReviewQueue() {
         <div className="flex items-center gap-3">
           <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-surface-container-high text-on-surface text-[11px] font-semibold border border-surface-border uppercase tracking-wider">
             <span className="w-2 h-2 rounded-full bg-status-review"></span>
-            12 PENDING
+            {loading ? '...' : `${items.length} PENDING`}
           </span>
-          <button className="px-4 py-1.5 border border-surface-border rounded-lg text-[12px] font-bold hover:bg-surface-container transition-colors flex items-center gap-2 bg-surface-container-lowest">
-            <Filter size={16} /> Filter
+          <button
+            onClick={() => void loadQueue()}
+            className="px-4 py-1.5 border border-surface-border rounded-lg text-[12px] font-bold hover:bg-surface-container transition-colors flex items-center gap-2 bg-surface-container-lowest"
+          >
+            <Filter size={16} /> Refresh
           </button>
         </div>
       </div>
 
-      {/* Split View */}
-      <div className="flex-1 grid grid-cols-1 xl:grid-cols-12 gap-6 min-h-0">
-        
-        {/* Left Pane: Field Transcript */}
-        <div className="xl:col-span-5 flex flex-col gap-4 min-h-0">
-          <div className="bg-surface-container-lowest border border-surface-border rounded-xl shadow-sm p-5 flex flex-col h-full overflow-y-auto">
-            
-            <div className="flex justify-between items-center mb-5 border-b border-surface-border pb-4">
-              <h3 className="text-[18px] font-semibold text-on-surface flex items-center gap-2">
-                <Mic className="text-primary" size={20} />
-                Field Transcript
-              </h3>
-              <span className="text-[13px] font-mono text-on-surface-variant bg-surface-container px-2 py-1 rounded">ID: EXT-8924</span>
-            </div>
+      {error && (
+        <p className="text-[14px] text-error bg-error-container/30 border border-error/20 rounded-lg px-4 py-2">{error}</p>
+      )}
 
-            <div className="bg-surface-container p-5 rounded-lg mb-6 border-l-4 border-primary">
-              <p className="text-[16px] text-on-surface italic leading-relaxed">
-                "Supervisor text input: Foundation pour at Sector 4 is complete, waiting on inspector approval for rebar."
-              </p>
-            </div>
-
-            <h4 className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider mb-4">Extracted Data</h4>
-            
-            <div className="grid grid-cols-2 gap-y-5 gap-x-6">
-              <div>
-                <span className="block text-[12px] font-bold text-outline mb-1.5">IDENTIFIER</span>
-                <span className="font-mono text-[13px] text-on-surface font-medium">--</span>
-              </div>
-              <div>
-                <span className="block text-[12px] font-bold text-outline mb-1.5">ACTION</span>
-                <span className="text-[14px] text-on-surface">Completed</span>
-              </div>
-              <div>
-                <span className="block text-[12px] font-bold text-outline mb-1.5">OBJECT</span>
-                <span className="text-[14px] text-on-surface">Foundation Pour, Rebar</span>
-              </div>
-              <div>
-                <span className="block text-[12px] font-bold text-outline mb-1.5">LOCATION</span>
-                <span className="text-[14px] text-on-surface">Sector 4</span>
-              </div>
-              <div className="col-span-2">
-                <span className="block text-[12px] font-bold text-outline mb-1.5">IMPLIED STATUS</span>
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-status-completed/10 text-status-completed text-[12px] font-bold border border-status-completed/20 uppercase">
-                  <CheckCircle2 size={14} /> COMPLETE
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center text-on-surface-variant">Loading review queue...</div>
+      ) : !currentItem ? (
+        <div className="flex-1 flex items-center justify-center text-on-surface-variant">
+          No items pending human review.
+        </div>
+      ) : (
+        <div className="flex-1 grid grid-cols-1 xl:grid-cols-12 gap-6 min-h-0">
+          <div className="xl:col-span-5 flex flex-col gap-4 min-h-0">
+            <div className="bg-surface-container-lowest border border-surface-border rounded-xl shadow-sm p-5 flex flex-col h-full overflow-y-auto">
+              <div className="flex justify-between items-center mb-5 border-b border-surface-border pb-4">
+                <h3 className="text-[18px] font-semibold text-on-surface flex items-center gap-2">
+                  <Mic className="text-primary" size={20} />
+                  Field Transcript
+                </h3>
+                <span className="text-[13px] font-mono text-on-surface-variant bg-surface-container px-2 py-1 rounded">
+                  ID: {currentItem.event.event_id}
                 </span>
               </div>
-            </div>
 
-            <div className="mt-auto pt-6">
-              <button className="w-full py-2.5 bg-surface-container-low hover:bg-surface-container-high border border-surface-border rounded-lg text-on-surface text-[14px] font-bold transition-colors flex items-center justify-center gap-2">
-                <AlertTriangle size={18} /> Mark as Unplanned Event
-              </button>
-            </div>
+              <div className="bg-surface-container p-5 rounded-lg mb-6 border-l-4 border-primary">
+                <p className="text-[16px] text-on-surface italic leading-relaxed">
+                  &quot;{currentItem.event.raw_text}&quot;
+                </p>
+              </div>
 
-          </div>
-        </div>
+              <h4 className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider mb-4">Extracted Data</h4>
 
-        {/* Right Pane: AI Match Candidates */}
-        <div className="xl:col-span-7 flex flex-col min-h-0 bg-surface-container-lowest border border-surface-border rounded-xl shadow-sm">
-          
-          <div className="p-5 border-b border-surface-border flex justify-between items-center bg-surface-bright rounded-t-xl shrink-0">
-            <h3 className="text-[18px] font-semibold text-on-surface flex items-center gap-2">
-              <BrainCircuit className="text-secondary" size={20} />
-              AI Match Candidates
-            </h3>
-            <span className="text-[12px] font-bold text-on-surface-variant">3 Candidates Found</span>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-5 space-y-4">
-            
-            {/* Top Match */}
-            <div className="border border-primary bg-primary-fixed/10 rounded-lg p-5 relative overflow-hidden transition-all shadow-sm">
-              <div className="absolute top-0 right-0 bg-primary text-on-primary text-[11px] font-bold px-3 py-1 rounded-bl-lg tracking-wider">TOP MATCH</div>
-              
-              <div className="flex justify-between items-start mb-4 pr-24">
+              <div className="grid grid-cols-2 gap-y-5 gap-x-6">
                 <div>
-                  <span className="font-mono text-[13px] font-semibold text-primary block mb-1">WBS: 24P201.04</span>
-                  <h4 className="text-[16px] font-medium text-on-surface">Concrete Pour - Sector 4 Foundation</h4>
+                  <span className="block text-[12px] font-bold text-outline mb-1.5">IDENTIFIER</span>
+                  <span className="font-mono text-[13px] text-on-surface font-medium">
+                    {currentItem.event.identifier ?? '—'}
+                  </span>
                 </div>
-                <div className="text-right">
-                  <div className="text-[24px] font-bold text-status-completed leading-none mb-1">94%</div>
-                  <div className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">CONFIDENCE</div>
+                <div>
+                  <span className="block text-[12px] font-bold text-outline mb-1.5">ACTION</span>
+                  <span className="text-[14px] text-on-surface">{currentItem.event.action ?? '—'}</span>
+                </div>
+                <div>
+                  <span className="block text-[12px] font-bold text-outline mb-1.5">OBJECT</span>
+                  <span className="text-[14px] text-on-surface">{currentItem.event.object ?? '—'}</span>
+                </div>
+                <div>
+                  <span className="block text-[12px] font-bold text-outline mb-1.5">LOCATION</span>
+                  <span className="text-[14px] text-on-surface">{currentItem.event.location ?? '—'}</span>
+                </div>
+                <div className="col-span-2">
+                  <span className="block text-[12px] font-bold text-outline mb-1.5">IMPLIED STATUS</span>
+                  {currentItem.event.status ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-status-completed/10 text-status-completed text-[12px] font-bold border border-status-completed/20 uppercase">
+                      <CheckCircle2 size={14} /> {currentItem.event.status}
+                    </span>
+                  ) : (
+                    <span className="text-[14px] text-on-surface-variant">—</span>
+                  )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 mb-5 bg-surface-container-lowest p-2.5 rounded border border-surface-border">
-                {['LOCATION MATCH', 'OBJECT MATCH', 'SCHEDULE ALIGNMENT'].map((label, idx) => (
-                  <div key={idx} className={`text-center p-1 ${idx === 1 ? 'border-x border-surface-border' : ''}`}>
-                    <div className="text-[10px] text-outline font-semibold uppercase tracking-wider mb-2">{label}</div>
-                    <div className="w-full bg-surface-variant h-1.5 rounded-full overflow-hidden">
-                      <div className="bg-status-completed h-full" style={{ width: ['100%', '90%', '85%'][idx] }}></div>
+              <div className="mt-auto pt-6">
+                <button
+                  onClick={() => void handleDecision('REJECT')}
+                  disabled={actionLoading}
+                  className="w-full py-2.5 bg-surface-container-low hover:bg-surface-container-high border border-surface-border rounded-lg text-on-surface text-[14px] font-bold transition-colors flex items-center justify-center gap-2 disabled:opacity-70"
+                >
+                  <AlertTriangle size={18} /> Mark as Unplanned Event
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="xl:col-span-7 flex flex-col min-h-0 bg-surface-container-lowest border border-surface-border rounded-xl shadow-sm">
+            <div className="p-5 border-b border-surface-border flex justify-between items-center bg-surface-bright rounded-t-xl shrink-0">
+              <h3 className="text-[18px] font-semibold text-on-surface flex items-center gap-2">
+                <BrainCircuit className="text-secondary" size={20} />
+                AI Match Candidates
+              </h3>
+              <span className="text-[12px] font-bold text-on-surface-variant">
+                {currentItem.candidates.length} Candidate{currentItem.candidates.length === 1 ? '' : 's'} Found
+              </span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {currentItem.candidates.length === 0 ? (
+                <p className="text-[14px] text-on-surface-variant">No match candidates available for this event.</p>
+              ) : (
+                currentItem.candidates.map((candidate, idx) => {
+                  const activity = currentItem.activities[candidate.activity_id];
+                  const isTop = idx === 0;
+                  const isSelected = candidate.activity_id === activeActivityId;
+
+                  if (isTop) {
+                    return (
+                      <div
+                        key={candidate.activity_id}
+                        className="border border-primary bg-primary-fixed/10 rounded-lg p-5 relative overflow-hidden transition-all shadow-sm"
+                      >
+                        <div className="absolute top-0 right-0 bg-primary text-on-primary text-[11px] font-bold px-3 py-1 rounded-bl-lg tracking-wider">
+                          TOP MATCH
+                        </div>
+
+                        <div className="flex justify-between items-start mb-4 pr-24">
+                          <div>
+                            <span className="font-mono text-[13px] font-semibold text-primary block mb-1">
+                              WBS: {candidate.activity_id}
+                            </span>
+                            <h4 className="text-[16px] font-medium text-on-surface">
+                              {activity?.description ?? 'Activity details unavailable'}
+                            </h4>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[24px] font-bold text-status-completed leading-none mb-1">
+                              {Math.round(candidate.overall_score)}%
+                            </div>
+                            <div className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
+                              CONFIDENCE
+                            </div>
+                          </div>
+                        </div>
+
+                        {currentItem.decision.reasons && currentItem.decision.reasons.length > 0 && (
+                          <div className="bg-surface-container-lowest p-4 rounded border border-surface-border mb-5 text-[14px] text-on-surface-variant leading-relaxed">
+                            <strong className="text-on-surface text-[12px] font-bold block mb-1.5">AI Reasoning:</strong>
+                            {currentItem.decision.reasons.join(' ')}
+                          </div>
+                        )}
+
+                        <div className="flex gap-3">
+                          <button
+                            onClick={() => void handleDecision('ACCEPT')}
+                            disabled={actionLoading || !activeActivityId}
+                            className="flex-1 bg-primary hover:bg-primary-container text-on-primary py-2.5 rounded-lg text-[14px] font-bold transition-colors flex justify-center items-center gap-2 disabled:opacity-70"
+                          >
+                            <Check size={18} /> ACCEPT MATCH
+                          </button>
+                          <button className="px-6 py-2.5 bg-surface-container-low hover:bg-surface-container-high border border-surface-border text-on-surface rounded-lg text-[14px] font-bold transition-colors">
+                            MODIFY
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={candidate.activity_id}
+                      className={`border rounded-lg p-5 transition-all hover:border-outline-variant ${
+                        isSelected ? 'border-primary bg-primary-fixed/5' : 'border-surface-border bg-surface-container-lowest'
+                      }`}
+                    >
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <span className="font-mono text-[13px] font-semibold text-secondary block mb-1">
+                            WBS: {candidate.activity_id}
+                          </span>
+                          <h4 className="text-[14px] font-medium text-on-surface">
+                            {activity?.description ?? 'Activity details unavailable'}
+                          </h4>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[20px] font-bold text-status-review leading-none">
+                            {Math.round(candidate.overall_score)}%
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleSwitchCandidate(candidate.activity_id)}
+                        className="w-full py-2 bg-surface-container-low hover:bg-surface-container-high border border-surface-border text-on-surface rounded-lg text-[14px] font-bold transition-colors flex justify-center items-center gap-2"
+                      >
+                        <ArrowRightLeft size={16} /> SWITCH TO THIS
+                      </button>
                     </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="bg-surface-container-lowest p-4 rounded border border-surface-border mb-5 text-[14px] text-on-surface-variant leading-relaxed">
-                <strong className="text-on-surface text-[12px] font-bold block mb-1.5">AI Reasoning:</strong>
-                Exact match on location ("Sector 4") and strong semantic match for action/object ("Foundation pour" ≈ "Concrete Pour - Foundation"). Activity is scheduled for this week.
-              </div>
-
-              <div className="flex gap-3">
-                <button className="flex-1 bg-primary hover:bg-primary-container text-on-primary py-2.5 rounded-lg text-[14px] font-bold transition-colors flex justify-center items-center gap-2">
-                  <Check size={18} /> ACCEPT MATCH
-                </button>
-                <button className="px-6 py-2.5 bg-surface-container-low hover:bg-surface-container-high border border-surface-border text-on-surface rounded-lg text-[14px] font-bold transition-colors">
-                  MODIFY
-                </button>
-              </div>
+                  );
+                })
+              )}
             </div>
 
-            {/* Match 2 */}
-            <div className="border border-surface-border bg-surface-container-lowest rounded-lg p-5 transition-all hover:border-outline-variant">
-              <div className="flex justify-between items-start mb-3">
-                <div>
-                  <span className="font-mono text-[13px] font-semibold text-secondary block mb-1">WBS: 24P201.05</span>
-                  <h4 className="text-[14px] font-medium text-on-surface">Rebar Installation - Sector 4</h4>
-                </div>
-                <div className="text-right">
-                  <div className="text-[20px] font-bold text-status-review leading-none">68%</div>
-                </div>
+            <div className="p-4 border-t border-surface-border bg-surface-bright rounded-b-xl flex justify-between items-center shrink-0">
+              <button
+                onClick={() => void handleDecision('REJECT')}
+                disabled={actionLoading}
+                className="text-error hover:bg-error/10 px-4 py-2 rounded-lg text-[14px] font-bold transition-colors flex items-center gap-2 border border-error/20 bg-error-container/50 disabled:opacity-70"
+              >
+                <X size={18} /> REJECT ALL
+              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setCurrentIndex((i) => Math.max(0, i - 1))}
+                  disabled={currentIndex === 0}
+                  className="p-2 border border-surface-border rounded hover:bg-surface-container transition-colors text-on-surface-variant disabled:opacity-50"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <span className="text-[13px] font-mono font-medium">
+                  {items.length === 0 ? '0 of 0' : `${currentIndex + 1} of ${items.length}`}
+                </span>
+                <button
+                  onClick={() => setCurrentIndex((i) => Math.min(items.length - 1, i + 1))}
+                  disabled={currentIndex >= items.length - 1}
+                  className="p-2 border border-surface-border rounded hover:bg-surface-container transition-colors text-on-surface-variant disabled:opacity-50"
+                >
+                  <ChevronRight size={18} />
+                </button>
               </div>
-              
-              <div className="text-[14px] text-on-surface-variant mb-5">
-                Matched location ("Sector 4") and object ("rebar"), but transcript indicates waiting *for* approval, not completion of installation.
-              </div>
-              
-              <button className="w-full py-2 bg-surface-container-low hover:bg-surface-container-high border border-surface-border text-on-surface rounded-lg text-[14px] font-bold transition-colors flex justify-center items-center gap-2">
-                <ArrowRightLeft size={16} /> SWITCH TO THIS
-              </button>
-            </div>
-
-          </div>
-
-          {/* Footer Navigation */}
-          <div className="p-4 border-t border-surface-border bg-surface-bright rounded-b-xl flex justify-between items-center shrink-0">
-            <button className="text-error hover:bg-error/10 px-4 py-2 rounded-lg text-[14px] font-bold transition-colors flex items-center gap-2 border border-error/20 bg-error-container/50">
-              <X size={18} /> REJECT ALL
-            </button>
-            <div className="flex items-center gap-3">
-              <button className="p-2 border border-surface-border rounded hover:bg-surface-container transition-colors text-on-surface-variant">
-                <ChevronLeft size={18} />
-              </button>
-              <span className="text-[13px] font-mono font-medium">1 of 12</span>
-              <button className="p-2 border border-surface-border rounded hover:bg-surface-container transition-colors text-on-surface-variant">
-                <ChevronRight size={18} />
-              </button>
             </div>
           </div>
-
         </div>
-
-      </div>
+      )}
     </div>
   );
 }
