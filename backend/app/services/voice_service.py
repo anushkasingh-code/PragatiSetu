@@ -1,7 +1,10 @@
 import os
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any
+
+logger = logging.getLogger(__name__)
 from sqlalchemy.orm import Session
 from backend.app.config import settings
 from backend.app.db.models.transcription import Transcription
@@ -83,11 +86,11 @@ def transcribe_uploaded_audio(
             code="TRANSCRIPTION_FAILED"
         )
     finally:
-        if temp_path.exists():
+        if temp_path and temp_path.exists():
             try:
                 temp_path.unlink()
-            except OSError:
-                pass
+            except Exception as cleanup_err:
+                logger.warning(f"Failed to cleanup temp audio file {temp_path}: {cleanup_err}")
 
 def update_transcription_text(transcription_id: str, new_transcript: str, db: Session) -> Transcription:
     """Updates/corrects transcript text for a transcription record."""
@@ -121,12 +124,21 @@ def process_transcription_to_events(
 
     target_project_id = project_id or trans.project_id or "PROJ-ALPHA"
     file_bytes = trans.transcript.encode("utf-8")
-    report_hash = calculate_sha256(file_bytes)
+
+    # BUG-012: Use audio file hash for SourceReport identity so identical transcripts from separate recordings do not collapse
+    if trans.file_hash and trans.file_hash.strip():
+        report_hash = trans.file_hash.strip()
+    else:
+        report_hash = calculate_sha256(f"{trans.transcription_id}:{trans.transcript}".encode("utf-8"))
 
     report_date = trans.created_at.date() if trans.created_at else datetime.now(timezone.utc).date()
 
     # Check for existing report or create synthetic SourceReport for voice transcript
-    existing_rep = db.query(SourceReport).filter(SourceReport.file_hash == report_hash).first()
+    existing_rep = (
+        db.query(SourceReport)
+        .filter(SourceReport.project_id == target_project_id, SourceReport.file_hash == report_hash)
+        .first()
+    )
     if not existing_rep:
         report_dir = Path(settings.UPLOAD_DIR)
         report_dir.mkdir(parents=True, exist_ok=True)

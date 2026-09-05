@@ -46,7 +46,7 @@ class EventExtractionService:
         # Store ExtractedEvent DB records
         created_events = []
         for event_data in events_to_create:
-            evt_id = f"EVT-{datetime.datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
+            evt_id = f"EVT-{datetime.datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:12].upper()}"
             evt = ExtractedEvent(
                 event_id=evt_id,
                 report_id=report.report_id,
@@ -127,13 +127,21 @@ class EventExtractionService:
 
     def _extract_from_spreadsheet(self, report: SourceReport) -> List[Dict[str, Any]]:
         events = []
-        try:
-            if report.source_type == "CSV":
+        if report.source_type == "CSV":
+            try:
                 df = pd.read_csv(io.StringIO(report.raw_content or ""))
-            else:
-                df = pd.read_json(io.StringIO(report.raw_content or ""), orient="records")
-        except Exception:
-            # Fallback to TXT segmenter if raw content is string
+            except Exception as e:
+                raise ValueError(f"Malformed CSV content could not be parsed: {str(e)}")
+        elif report.source_type == "XLSX":
+            try:
+                import json
+                parsed_records = json.loads(report.raw_content or "[]")
+                if not isinstance(parsed_records, list):
+                    raise ValueError("Serialized XLSX content must be a JSON array of row records.")
+                df = pd.DataFrame(parsed_records)
+            except Exception as e:
+                raise ValueError(f"Malformed XLSX serialized JSON content could not be parsed: {str(e)}")
+        else:
             return self._extract_from_txt(report)
 
         if df.empty:

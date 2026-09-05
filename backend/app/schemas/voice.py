@@ -21,6 +21,10 @@ class TranscriptionResponse(BaseModel):
 class TranscriptUpdateRequest(BaseModel):
     transcript: str = Field(..., min_length=1, description="Corrected transcript text from human planner")
 
+class VoiceProcessRequest(BaseModel):
+    transcription_id: str
+    project_id: Optional[str] = None
+
 class VoiceProcessResponse(BaseModel):
     transcription_id: str
     transcript: str

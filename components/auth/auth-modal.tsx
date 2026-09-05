@@ -38,7 +38,10 @@ export function AuthModal() {
 
   const handleSignupSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    signup(name, email, password, role, workerId);
+    const ok = signup(name, email, password, role, workerId);
+    if (!ok) {
+      setSubmittedMessage('Please enter a valid email address.');
+    }
   };
 
   return (

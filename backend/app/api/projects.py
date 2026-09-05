@@ -1,10 +1,10 @@
 import os
 import shutil
 import tempfile
-from typing import List
+from typing import Dict, List, Tuple
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import case, func
 from backend.app.db.database import get_db
 from backend.app.db.models.project import Project
 from backend.app.db.models.wbs import WBSNode
@@ -22,41 +22,73 @@ from backend.app.services.baseline_importer import BaselineImporter
 
 router = APIRouter(tags=["Projects & Activities"])
 
+def _project_status(project_id: str, total: int, completed: int, in_progress: int) -> str:
+    if total > 0 and completed == total:
+        return "Completed"
+    if in_progress > 0 or completed > 0 or project_id == "PROJ-ALPHA":
+        return "Operational"
+    return "Planning"
+
+
+def _empty_activity_stats() -> Tuple[int, int, int, float]:
+    return 0, 0, 0, 0.0
+
+
+def _load_project_activity_stats(db: Session, project_ids: List[str] | None = None) -> Dict[str, Tuple[int, int, int, float]]:
+    """
+    Aggregate activity counts and average percent_complete per project.
+    Returns mapping: project_id -> (total, completed, in_progress, avg_pct)
+    """
+    query = db.query(
+        ScheduleActivity.project_id,
+        func.count(ScheduleActivity.activity_id).label("total"),
+        func.coalesce(func.sum(case((ScheduleActivity.status == "COMPLETED", 1), else_=0)), 0).label("completed"),
+        func.coalesce(
+            func.sum(case((ScheduleActivity.status.in_(["IN_PROGRESS", "STARTED"]), 1), else_=0)),
+            0,
+        ).label("in_progress"),
+        func.avg(ScheduleActivity.percent_complete).label("avg_pct"),
+    )
+    if project_ids is not None:
+        if not project_ids:
+            return {}
+        query = query.filter(ScheduleActivity.project_id.in_(project_ids))
+    rows = query.group_by(ScheduleActivity.project_id).all()
+    stats: Dict[str, Tuple[int, int, int, float]] = {}
+    for row in rows:
+        stats[row.project_id] = (
+            int(row.total or 0),
+            int(row.completed or 0),
+            int(row.in_progress or 0),
+            float(row.avg_pct or 0.0),
+        )
+    return stats
+
+
+def _build_project_response(project: Project, stats: Tuple[int, int, int, float] | None = None) -> ProjectResponse:
+    total, completed, in_progress, avg_pct = stats if stats is not None else _empty_activity_stats()
+    prog = round(avg_pct, 1) if total > 0 else 0.0
+    return ProjectResponse(
+        project_id=project.project_id,
+        name=project.name,
+        description=project.description,
+        created_at=project.created_at,
+        status=_project_status(project.project_id, total, completed, in_progress),
+        progress_percentage=prog,
+        total_activities=total,
+        completed_activities=completed,
+    )
+
+
 @router.get("/projects", response_model=List[ProjectResponse])
 def get_projects(db: Session = Depends(get_db)):
     """Fetch all projects with real computed progress and operational status."""
     projects = db.query(Project).all()
-    results = []
-    for p in projects:
-        acts = db.query(ScheduleActivity).filter(ScheduleActivity.project_id == p.project_id)
-        total = acts.count()
-        completed = acts.filter(ScheduleActivity.status == "COMPLETED").count()
-        in_progress = acts.filter(ScheduleActivity.status.in_(["IN_PROGRESS", "STARTED"])).count()
-
-        if total > 0:
-            avg_pct = db.query(func.avg(ScheduleActivity.percent_complete)).filter(ScheduleActivity.project_id == p.project_id).scalar() or 0.0
-            prog = round(float(avg_pct), 1)
-        else:
-            prog = 0.0
-
-        if total > 0 and completed == total:
-            status_val = "Completed"
-        elif in_progress > 0 or completed > 0 or p.project_id == "PROJ-ALPHA":
-            status_val = "Operational"
-        else:
-            status_val = "Planning"
-
-        results.append(ProjectResponse(
-            project_id=p.project_id,
-            name=p.name,
-            description=p.description,
-            created_at=p.created_at,
-            status=status_val,
-            progress_percentage=prog,
-            total_activities=total,
-            completed_activities=completed
-        ))
-    return results
+    stats_map = _load_project_activity_stats(db)
+    return [
+        _build_project_response(p, stats_map.get(p.project_id, _empty_activity_stats()))
+        for p in projects
+    ]
 
 @router.post("/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 def create_project(payload: ProjectCreate, db: Session = Depends(get_db)):
@@ -76,7 +108,7 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)):
     db.add(project)
     db.commit()
     db.refresh(project)
-    return project
+    return _build_project_response(project, _empty_activity_stats())
 
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
 def get_project_by_id(project_id: str, db: Session = Depends(get_db)):
@@ -87,7 +119,8 @@ def get_project_by_id(project_id: str, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Project with ID '{project_id}' not found."
         )
-    return project
+    stats_map = _load_project_activity_stats(db, [project.project_id])
+    return _build_project_response(project, stats_map.get(project.project_id, _empty_activity_stats()))
 
 @router.delete("/projects/{project_id}", status_code=status.HTTP_200_OK)
 def delete_project(project_id: str, db: Session = Depends(get_db)):
@@ -138,7 +171,7 @@ async def upload_baseline_schedule(project_id: str, file: UploadFile = File(...)
 
     try:
         importer = BaselineImporter(db)
-        importer.import_excel_baseline(tmp_path)
+        importer.import_excel_baseline(tmp_path, target_project_id=project_id)
         activities_count = db.query(ScheduleActivity).filter(ScheduleActivity.project_id == project_id).count()
         return {
             "project_id": project_id,
@@ -147,6 +180,11 @@ async def upload_baseline_schedule(project_id: str, file: UploadFile = File(...)
             "activities_imported": activities_count,
             "message": "Baseline schedule imported successfully."
         }
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

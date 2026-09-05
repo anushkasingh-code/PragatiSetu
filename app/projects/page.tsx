@@ -5,11 +5,18 @@ import { Folder, ArrowRight, Plus, X, Loader2, CheckCircle2, Building2, Trash2, 
 import Link from 'next/link';
 import { useEffect, useState, useCallback } from 'react';
 import { useAppDataRefresh, notifyAppDataRefresh } from '@/lib/app-sync';
-import { getDeletedProjectCodes, recordDeletedProjectCode, unrecordDeletedProjectCode, FALLBACK_PROJECTS } from '@/lib/projects';
-import { clearFallbackData } from '@/lib/report-fallback';
+import { getDeletedProjectCodes, recordDeletedProjectCode, unrecordDeletedProjectCode } from '@/lib/projects';
 
 export default function Projects() {
-  const [projects, setProjects] = useState(FALLBACK_PROJECTS);
+  const [projects, setProjects] = useState<{
+    name: string;
+    code: string;
+    displayCode: string;
+    status: string;
+    progress: number;
+  }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newProjName, setNewProjName] = useState('');
   const [newProjDesc, setNewProjDesc] = useState('');
@@ -20,39 +27,38 @@ export default function Projects() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const fetchProjects = useCallback(() => {
+  const fetchProjects = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     const deleted = getDeletedProjectCodes();
-    apiFetch<{ project_id: string; name: string; description?: string; created_at?: string; status?: string; progress_percentage?: number }[]>('/projects')
-      .then((data) => {
-        if (Array.isArray(data)) {
-          const apiProjects = data
-            .filter((p) => !deleted.has(p.project_id))
-            .map((p) => {
-              const isAlpha = p.project_id === 'PROJ-ALPHA' || p.name.includes('Project Alpha');
-              const displayStatus = p.status && p.status !== 'N/A' ? p.status : isAlpha ? 'Operational' : 'Planning';
-              return {
-                name: isAlpha ? 'Project Alpha' : p.name,
-                code: p.project_id,
-                displayCode: isAlpha ? '24P201' : p.project_id,
-                status: displayStatus,
-                progress: p.progress_percentage != null ? p.progress_percentage : isAlpha ? 31.3 : 0,
-              };
-            });
-
-          if (apiProjects.length > 0) {
-            setProjects(apiProjects);
-          } else if (data.length > 0) {
-            setProjects([]);
-          } else {
-            const activeFallbacks = FALLBACK_PROJECTS.filter((p) => !deleted.has(p.code));
-            setProjects(activeFallbacks);
-          }
-        }
-      })
-      .catch(() => {
-        const activeFallbacks = FALLBACK_PROJECTS.filter((p) => !deleted.has(p.code));
-        setProjects(activeFallbacks);
-      });
+    try {
+      const res = await apiFetchSafe<{ project_id: string; name: string; description?: string; created_at?: string; status?: string; progress_percentage?: number }[]>('/projects');
+      if (res.ok && Array.isArray(res.data)) {
+        const apiProjects = res.data
+          .filter((p) => !deleted.has(p.project_id))
+          .map((p) => {
+            const isAlpha = p.project_id === 'PROJ-ALPHA' || p.name.includes('Project Alpha');
+            const displayStatus = p.status && p.status !== 'N/A' ? p.status : isAlpha ? 'Operational' : 'Planning';
+            return {
+              name: isAlpha ? 'Project Alpha' : p.name,
+              code: p.project_id,
+              displayCode: isAlpha ? '24P201' : p.project_id,
+              status: displayStatus,
+              progress: p.progress_percentage != null ? p.progress_percentage : 0,
+            };
+          });
+        setProjects(apiProjects);
+        setError(null);
+      } else {
+        setError(res.error || 'Failed to load projects from server.');
+        setProjects([]);
+      }
+    } catch {
+      setError('Network error connecting to backend API.');
+      setProjects([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -168,58 +174,91 @@ export default function Projects() {
         </button>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {projects.map((p) => (
-          <div key={p.code} className="bg-surface-container-lowest border border-surface-border rounded-xl p-6 hover:shadow-md transition-shadow">
-            <div className="flex justify-between items-start mb-4">
-              <div className="w-10 h-10 rounded-lg bg-primary-fixed/30 text-primary flex items-center justify-center">
-                <Folder size={20} />
-              </div>
-              <span className={`text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-sm border ${
-                p.status === 'Completed'
-                  ? 'bg-status-completed/10 text-status-completed border-status-completed/30'
-                  : p.status === 'Operational'
-                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                  : p.status === 'Planning'
-                  ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
-                  : 'bg-surface-container-high text-on-surface-variant border-surface-border'
-              }`}>
-                {p.status}
-              </span>
-            </div>
-            <h3 className="text-[18px] font-semibold text-on-surface mb-1">{p.name}</h3>
-            <p className="font-mono text-[13px] text-on-surface-variant mb-6">{p.displayCode ?? p.code}</p>
-            
-            <div className="space-y-2 mb-6">
-              <div className="flex justify-between text-[12px] font-bold">
-                <span className="text-on-surface-variant">Progress</span>
-                <span className="text-on-surface">{p.progress}%</span>
-              </div>
-              <div className="w-full bg-surface-container rounded-full h-1.5">
-                <div className="bg-primary h-1.5 rounded-full" style={{ width: `${p.progress}%` }}></div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Link href={`/?project_id=${encodeURIComponent(p.code)}`} className="flex-1 py-2 bg-surface-container-low hover:bg-surface-container-high border border-surface-border rounded-lg text-[13px] font-bold text-on-surface flex items-center justify-center gap-2 transition-colors">
-                Open Dashboard <ArrowRight size={16} />
-              </Link>
-              <button
-                type="button"
-                onClick={() => {
-                  setDeleteError(null);
-                  setProjectToDelete({ code: p.code, name: p.name });
-                }}
-                title={`Delete ${p.name}`}
-                aria-label={`Delete ${p.name}`}
-                className="p-2 border border-surface-border hover:border-status-conflict/40 hover:bg-status-conflict/10 text-on-surface-variant hover:text-status-conflict rounded-lg transition-colors cursor-pointer shrink-0"
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
+      {error && (
+        <div className="p-4 rounded-xl border border-status-conflict/30 bg-status-conflict/10 text-status-conflict text-[13px] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={16} />
+            <span>{error}</span>
           </div>
-        ))}
-      </div>
+          <button
+            type="button"
+            onClick={fetchProjects}
+            className="text-[12px] font-bold underline cursor-pointer hover:opacity-80"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center justify-center py-20 text-on-surface-variant">
+          <Loader2 size={24} className="animate-spin text-primary mr-2" />
+          <span className="text-[14px]">Loading projects from database...</span>
+        </div>
+      ) : projects.length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {projects.map((p) => (
+            <div key={p.code} className="bg-surface-container-lowest border border-surface-border rounded-xl p-6 hover:shadow-md transition-shadow">
+              <div className="flex justify-between items-start mb-4">
+                <div className="w-10 h-10 rounded-lg bg-primary-fixed/30 text-primary flex items-center justify-center">
+                  <Folder size={20} />
+                </div>
+                <span className={`text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-sm border ${
+                  p.status === 'Completed'
+                    ? 'bg-status-completed/10 text-status-completed border-status-completed/30'
+                    : p.status === 'Operational'
+                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                    : p.status === 'Planning'
+                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                    : 'bg-surface-container-high text-on-surface-variant border-surface-border'
+                }`}>
+                  {p.status}
+                </span>
+              </div>
+              <h3 className="text-[18px] font-semibold text-on-surface mb-1">{p.name}</h3>
+              <p className="font-mono text-[13px] text-on-surface-variant mb-6">{p.displayCode ?? p.code}</p>
+              
+              <div className="space-y-2 mb-6">
+                <div className="flex justify-between text-[12px] font-bold">
+                  <span className="text-on-surface-variant">Progress</span>
+                  <span className="text-on-surface">{p.progress}%</span>
+                </div>
+                <div className="w-full bg-surface-container rounded-full h-1.5">
+                  <div className="bg-primary h-1.5 rounded-full" style={{ width: `${p.progress}%` }}></div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Link href={`/?project_id=${encodeURIComponent(p.code)}`} className="flex-1 py-2 bg-surface-container-low hover:bg-surface-container-high border border-surface-border rounded-lg text-[13px] font-bold text-on-surface flex items-center justify-center gap-2 transition-colors">
+                  Open Dashboard <ArrowRight size={16} />
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteError(null);
+                    setProjectToDelete({ code: p.code, name: p.name });
+                  }}
+                  title={`Delete ${p.name}`}
+                  aria-label={`Delete ${p.name}`}
+                  className="p-2 border border-surface-border hover:border-status-conflict/40 hover:bg-status-conflict/10 text-on-surface-variant hover:text-status-conflict rounded-lg transition-colors cursor-pointer shrink-0"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : !error && (
+        <div className="p-12 text-center bg-surface-container-lowest border border-surface-border rounded-xl text-on-surface flex flex-col items-center justify-center max-w-md mx-auto space-y-3">
+          <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center">
+            <Folder size={24} />
+          </div>
+          <h4 className="text-[16px] font-semibold">No Projects Found</h4>
+          <p className="text-[13px] text-on-surface-variant leading-relaxed">
+            There are no projects configured in the database yet. Click &quot;New Project&quot; above to initialize your first project.
+          </p>
+        </div>
+      )}
 
       {/* Delete Confirmation Modal */}
       {projectToDelete && (

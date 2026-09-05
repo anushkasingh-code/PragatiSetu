@@ -3,13 +3,7 @@
 import { apiFetchSafe } from '@/lib/api';
 import { notifyAppDataRefresh, useAppDataRefresh } from '@/lib/app-sync';
 import { Suspense } from 'react';
-import {
-  FALLBACK_WBS_CODE,
-  getPendingFallbackReviews,
-  resolveFallbackReview,
-  type FallbackReviewRecord,
-} from '@/lib/report-fallback';
-import { getDeletedProjectCodes, isProjectDeleted, FALLBACK_PROJECTS } from '@/lib/projects';
+import { getDeletedProjectCodes, isProjectDeleted } from '@/lib/projects';
 import {
   Filter,
   Mic,
@@ -63,66 +57,19 @@ type ReviewItem = {
   decision: MatchDecision;
   candidates: CandidateScore[];
   activities: Record<string, Activity>;
-  isFallback?: boolean;
 };
 
 const PENDING_DECISIONS = new Set(['HUMAN_REVIEW', 'UNPLANNED_REVIEW', 'CONFLICT_REVIEW']);
-
-function fallbackToReviewItem(record: FallbackReviewRecord): ReviewItem {
-  const activities: Record<string, Activity> = {
-    [FALLBACK_WBS_CODE]: {
-      activity_id: FALLBACK_WBS_CODE,
-      description: 'Spool Erection — Rack B Piping Package',
-      equipment_or_line_id: FALLBACK_WBS_CODE,
-    },
-    'PIP-204-018': {
-      activity_id: 'PIP-204-018',
-      description: 'Hydrotest — Rack B Piping Package',
-      equipment_or_line_id: 'PIP-204-018',
-    },
-  };
-
-  return {
-    event: {
-      event_id: record.event_id,
-      report_id: record.report_id,
-      raw_text: record.raw_text,
-      identifier: record.identifier,
-      action: record.action,
-      object: record.object,
-      location: record.location,
-      status: record.status,
-    },
-    decision: {
-      event_id: record.event_id,
-      decision: record.decision,
-      top_activity_id: record.top_activity_id,
-      match_confidence: record.match_confidence,
-      reasons: record.reasons,
-    },
-    candidates: record.candidates,
-    activities,
-    isFallback: true,
-  };
-}
 
 async function fetchPendingReviews(projectId: string): Promise<ReviewItem[]> {
   if (!projectId || isProjectDeleted(projectId)) {
     return [];
   }
-  // 1. Fetch live pending reviews from fast aggregated backend endpoint
   const pendingRes = await apiFetchSafe<ReviewItem[]>(`/projects/${encodeURIComponent(projectId)}/reviews/pending?limit=1000`);
   if (pendingRes.ok && Array.isArray(pendingRes.data)) {
-    if (pendingRes.data.length > 0) {
-      return pendingRes.data;
-    }
-    // Only return fallback items specifically created for this project
-    return getPendingFallbackReviews(projectId).map(fallbackToReviewItem);
+    return pendingRes.data;
   }
-
-  // 2. If network failed, only fallback if project is not deleted
-  const fallbackItems = getPendingFallbackReviews(projectId).map(fallbackToReviewItem);
-  return fallbackItems;
+  return [];
 }
 
 function ReviewQueueContent() {
@@ -147,26 +94,19 @@ function ReviewQueueContent() {
   const resolveActiveProject = useCallback(async () => {
     const deleted = getDeletedProjectCodes();
     const res = await apiFetchSafe<{ project_id: string; name: string; description?: string }[]>('/projects');
-    let available: { project_id: string; name: string; displayCode: string }[] = [];
-
-    if (res.ok && Array.isArray(res.data) && res.data.length > 0) {
-      available = res.data
-        .filter((p) => !deleted.has(p.project_id))
-        .map((p) => ({
-          project_id: p.project_id,
-          name: p.name,
-          displayCode: p.project_id === 'PROJ-ALPHA' ? '24P201' : p.project_id,
-        }));
+    if (!res.ok) {
+      setError(res.error || 'Failed to load projects from server.');
+      setActiveProject(null);
+      return null;
     }
 
-    if (available.length === 0 && (!res.ok || res.data.length === 0)) {
-      const activeFallbacks = FALLBACK_PROJECTS.filter((p) => !deleted.has(p.code));
-      available = activeFallbacks.map((p) => ({
-        project_id: p.code,
+    const available = (Array.isArray(res.data) ? res.data : [])
+      .filter((p) => !deleted.has(p.project_id))
+      .map((p) => ({
+        project_id: p.project_id,
         name: p.name,
-        displayCode: p.displayCode,
+        displayCode: p.project_id === 'PROJ-ALPHA' ? '24P201' : p.project_id,
       }));
-    }
 
     if (available.length === 0) {
       setActiveProject(null);
@@ -237,18 +177,6 @@ function ReviewQueueContent() {
           ? 'Planner marked as unplanned event'
           : 'Planner rejected match');
 
-      if (currentItem.isFallback) {
-        resolveFallbackReview(currentItem.event.event_id);
-        setItems((prev) => {
-          const next = prev.filter((it) => it.event.event_id !== currentItem.event.event_id);
-          setCurrentIndex((idx) => (next.length === 0 ? 0 : Math.min(idx, next.length - 1)));
-          return next;
-        });
-        notifyAppDataRefresh({ source: 'review-queue' });
-        await loadQueue();
-        return;
-      }
-
       const result = await apiFetchSafe(`/reviews/${currentItem.event.event_id}/decision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -286,7 +214,8 @@ function ReviewQueueContent() {
     setActionLoading(true);
     setError(null);
     try {
-      await apiFetchSafe('/reviews/reset', { method: 'POST' });
+      const pid = activeProject?.project_id || 'PROJ-ALPHA';
+      await apiFetchSafe(`/projects/${encodeURIComponent(pid)}/reviews/reset-demo`, { method: 'POST' });
       notifyAppDataRefresh({ source: 'review-queue' });
       await loadQueue();
     } catch {

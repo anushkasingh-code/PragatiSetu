@@ -34,32 +34,6 @@ def save_groq_api_key(key: str) -> str:
     if hasattr(settings, "GROQ_ENABLED"):
         settings.GROQ_ENABLED = True
 
-    # Persist to disk in standard .env paths
-    env_paths = [
-        os.path.join(os.getcwd(), ".env"),
-        os.path.join(os.getcwd(), "backend", ".env"),
-    ]
-    for env_path in env_paths:
-        try:
-            lines = []
-            found = False
-            if os.path.exists(env_path):
-                with open(env_path, "r", encoding="utf-8", errors="ignore") as f:
-                    for line in f:
-                        if line.startswith("GROQ_API_KEY="):
-                            lines.append(f"GROQ_API_KEY={cleaned}\n")
-                            found = True
-                        elif line.startswith("GROQ_ENABLED="):
-                            lines.append("GROQ_ENABLED=true\n")
-                        else:
-                            lines.append(line)
-            if not found:
-                lines.append(f"GROQ_API_KEY={cleaned}\n")
-                lines.append("GROQ_ENABLED=true\n")
-            with open(env_path, "w", encoding="utf-8") as f:
-                f.writelines(lines)
-        except Exception as e:
-            logger.warning(f"Could not persist key to {env_path}: {e}")
     return cleaned
 
 def get_effective_groq_api_key(runtime_key: Optional[str] = None) -> str:

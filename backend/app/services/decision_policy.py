@@ -6,7 +6,7 @@ from backend.app.config import settings
 SCORING_POLICY_VERSION = "v1"
 
 IGNORE_KEYWORDS_REGEX = re.compile(
-    r"\b(safety meeting|toolbox talk|tool box talk|weather delay|heavy rain|holiday|no work carried out|no activities|administrative|site meeting)\b",
+    r"\b(safety meeting|toolbox talk|tool box talk|weather delay|heavy rain|holiday|no work carried out|no activities|administrative|site meeting|hse meeting|crew briefing|manpower count|safety induction|site induction)\b",
     re.IGNORECASE
 )
 

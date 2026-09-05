@@ -25,6 +25,8 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { apiFetchSafe } from '@/lib/api';
+import { getDeletedProjectCodes } from '@/lib/projects';
+import { useAppDataRefresh } from '@/lib/app-sync';
 
 interface ChatActivityItem {
   activity_id: string;
@@ -182,13 +184,42 @@ function renderInlineStyles(text: string): React.ReactNode {
 export function AiChatDrawer() {
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [selectedProjectId, setSelectedProjectId] = useState('PROJ-ALPHA');
+  const [projects, setProjects] = useState<{ project_id: string; name: string; displayCode: string }[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [engineSource, setEngineSource] = useState<'groq' | 'local_rag'>('local_rag');
+
+  const fetchProjects = useCallback(async () => {
+    const deleted = getDeletedProjectCodes();
+    const res = await apiFetchSafe<{ project_id: string; name: string }[]>('/projects');
+    if (res.ok && Array.isArray(res.data)) {
+      const list = res.data
+        .filter((p) => !deleted.has(p.project_id))
+        .map((p) => ({
+          project_id: p.project_id,
+          name: p.name,
+          displayCode: p.project_id === 'PROJ-ALPHA' ? '24P201' : p.project_id,
+        }));
+      setProjects(list);
+      setSelectedProjectId((prev) => {
+        if (prev && list.some((p) => p.project_id === prev)) return prev;
+        return list[0]?.project_id || '';
+      });
+    } else {
+      setProjects([]);
+      setSelectedProjectId('');
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchProjects();
+  }, [fetchProjects]);
+
+  useAppDataRefresh(fetchProjects);
 
   // Key Modal State
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
@@ -309,7 +340,8 @@ export function AiChatDrawer() {
       });
       if (res.ok && res.data && res.data.configured) {
         if (typeof window !== 'undefined') {
-          localStorage.setItem('pragatisetu_groq_key', inputApiKey.trim());
+          // Never store API keys in localStorage (Safety Requirement 8). Purge any legacy key.
+          localStorage.removeItem('pragatisetu_groq_key');
         }
         setEngineSource('groq');
         setKeyFeedback({ type: 'success', text: 'Groq API Key activated! Llama-3.3-70B is now active.' });
@@ -334,6 +366,19 @@ export function AiChatDrawer() {
     if (!query || isLoading) return;
 
     setInputValue('');
+    if (!selectedProjectId) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `ai-${Date.now()}`,
+          role: 'assistant',
+          content: 'No active project available. Please select or create a project before chatting.',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+      return;
+    }
+
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
       role: 'user',
@@ -346,8 +391,6 @@ export function AiChatDrawer() {
     setIsLoading(true);
 
     try {
-      const storedKey = typeof window !== 'undefined' ? localStorage.getItem('pragatisetu_groq_key') : null;
-
       const res = await apiFetchSafe<{
         reply: string;
         grounded_candidates: string[];
@@ -362,7 +405,6 @@ export function AiChatDrawer() {
           project_id: selectedProjectId,
           messages: newHistory.map((m) => ({ role: m.role, content: m.content })),
           top_k: 4,
-          api_key: storedKey || undefined,
         }),
       });
 
@@ -484,15 +526,24 @@ export function AiChatDrawer() {
               </button>
 
               {/* Project Picker */}
-              <select
-                value={selectedProjectId}
-                onChange={(e) => setSelectedProjectId(e.target.value)}
-                className="text-[11px] font-bold bg-surface-container border border-surface-border rounded-md px-2 py-1 text-on-surface focus:outline-none cursor-pointer"
-                title="Active Project Context"
-              >
-                <option value="PROJ-ALPHA">Project Alpha (24P201)</option>
-                <option value="PROJ-BETA">Project Beta</option>
-              </select>
+              {projects.length > 0 ? (
+                <select
+                  value={selectedProjectId}
+                  onChange={(e) => setSelectedProjectId(e.target.value)}
+                  className="text-[11px] font-bold bg-surface-container border border-surface-border rounded-md px-2 py-1 text-on-surface focus:outline-none cursor-pointer max-w-[170px] truncate"
+                  title="Active Project Context"
+                >
+                  {projects.map((p) => (
+                    <option key={p.project_id} value={p.project_id}>
+                      {p.name} ({p.displayCode})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="text-[11px] text-on-surface-variant bg-surface-container px-2 py-1 rounded border border-surface-border">
+                  No projects available
+                </span>
+              )}
 
               {/* Clear */}
               {messages.length > 0 && (

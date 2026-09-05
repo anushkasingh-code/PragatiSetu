@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, s
 from sqlalchemy.orm import Session
 from backend.app.db.database import get_db
 from backend.app.db.models.transcription import Transcription
-from backend.app.schemas.voice import TranscriptionResponse, TranscriptUpdateRequest, VoiceProcessResponse
+from backend.app.schemas.voice import TranscriptionResponse, TranscriptUpdateRequest, VoiceProcessResponse, VoiceProcessRequest
 from backend.app.services.audio_validator import AudioValidationError
 from backend.app.services.voice_service import (
     transcribe_uploaded_audio,
@@ -45,32 +45,30 @@ async def transcribe_audio_endpoint(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error transcribing audio: {str(e)}"
+            detail=f"Speech transcription failed: {str(e)}"
         )
 
 @router.get("/transcriptions/{transcription_id}", response_model=TranscriptionResponse)
-def get_transcription_by_id(transcription_id: str, db: Session = Depends(get_db)):
-    """Retrieves details and status of a transcription record."""
-    trans = db.query(Transcription).filter(Transcription.transcription_id == transcription_id).first()
-    if not trans:
+def get_transcription_endpoint(transcription_id: str, db: Session = Depends(get_db)):
+    """Retrieves an existing audio transcription record."""
+    t = db.query(Transcription).filter(Transcription.transcription_id == transcription_id).first()
+    if not t:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Transcription with ID '{transcription_id}' not found."
         )
-    return trans
+    return t
 
 @router.patch("/transcriptions/{transcription_id}", response_model=TranscriptionResponse)
-def update_transcript_text_endpoint(
+def update_transcript_endpoint(
     transcription_id: str,
     payload: TranscriptUpdateRequest,
     db: Session = Depends(get_db)
 ):
-    """
-    Allows human planner to edit/correct transcript text before feeding it into event extraction.
-    """
+    """Allows human planner to edit/correct a generated audio transcript prior to downstream processing."""
     try:
-        trans = update_transcription_text(transcription_id, payload.transcript, db)
-        return trans
+        updated = update_transcription_text(transcription_id, payload.transcript, db)
+        return updated
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -83,18 +81,47 @@ def update_transcript_text_endpoint(
         )
 
 @router.post("/transcriptions/{transcription_id}/process", response_model=VoiceProcessResponse, status_code=status.HTTP_200_OK)
-@router.post("/voice/process", response_model=VoiceProcessResponse, status_code=status.HTTP_200_OK)
-def process_voice_transcript_endpoint(
+def process_transcription_endpoint(
     transcription_id: str,
     project_id: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
-    Submits a completed voice transcript into the existing text event extraction pipeline.
-    Invokes EventExtractionService, preserving raw transcript text and producing structured ExtractedEvent records.
+    Submits a completed voice transcript into the existing text event extraction pipeline by path param.
     """
     try:
         res = process_transcription_to_events(transcription_id, project_id, db)
+        return res
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing transcript to events: {str(e)}"
+        )
+
+@router.post("/voice/process", response_model=VoiceProcessResponse, status_code=status.HTTP_200_OK)
+def process_voice_endpoint(
+    payload: Optional[VoiceProcessRequest] = None,
+    transcription_id: Optional[str] = None,
+    project_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Submits a completed voice transcript via POST /voice/process accepting body payload or query parameters.
+    """
+    tid = (payload.transcription_id if payload and payload.transcription_id else transcription_id)
+    if not tid:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Field 'transcription_id' is required in request body or query parameters."
+        )
+    pid = (payload.project_id if payload and payload.project_id else project_id)
+    try:
+        res = process_transcription_to_events(tid, pid, db)
         return res
     except ValueError as e:
         raise HTTPException(
