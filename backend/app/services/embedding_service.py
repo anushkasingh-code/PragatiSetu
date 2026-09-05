@@ -77,6 +77,6 @@ def compute_semantic_similarity(event_text: str, activity: Any) -> float:
         except Exception:
             pass
 
-    # If embedding model is unavailable, return neutral semantic score (50.0).
+    # If embedding model is unavailable, return 0.0.
     # We do not use fake Jaccard hashes for semantic_score to prevent false high confidence.
-    return 50.0
+    return 0.0
