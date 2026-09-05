@@ -11,8 +11,9 @@ from backend.app.services.normalizer_service import (
     normalize_object,
     normalize_location
 )
-from backend.app.services.embedding_service import precompute_schedule_embeddings
+from backend.app.services.embedding_service import precompute_schedule_embeddings, is_embedding_model_degraded
 from backend.app.services.candidate_scorer import compute_all_candidate_scores
+from backend.app.services.ai.vector_retriever import search_schedule_activities
 
 class CandidateGeneratorService:
     def __init__(self, db: Session):
@@ -40,17 +41,56 @@ class CandidateGeneratorService:
             raise ValueError(f"SourceReport with ID '{event.report_id}' not found.")
 
         project_id = report.project_id
-        activities = self.db.query(ScheduleActivity).filter(ScheduleActivity.project_id == project_id).all()
+        activities_to_score = []
+        
+        # Construct semantic query
+        query_text = f"{event.normalized_action or ''} {event.normalized_object or ''} {event.normalized_location or ''}".strip()
+        if not query_text:
+            query_text = event.raw_text or ""
+            
+        vector_results = search_schedule_activities(
+            project_id=project_id,
+            query=query_text,
+            top_k=max(10, top_n * 2)
+        )
+        
+        if vector_results and not is_embedding_model_degraded():
+            # We got semantic candidates and model is healthy. Retrieve these specific activities.
+            vector_act_ids = [res.activity_id for res in vector_results]
+            
+            # Also ALWAYS include exact identifier matches if an identifier exists, to prevent semantic misses on IDs
+            if event.normalized_identifier:
+                from sqlalchemy import or_
+                identifier_matches = self.db.query(ScheduleActivity).filter(
+                    ScheduleActivity.project_id == project_id,
+                    or_(
+                        ScheduleActivity.activity_id == event.normalized_identifier,
+                        ScheduleActivity.equipment_or_line_id == event.normalized_identifier
+                    )
+                ).all()
+                for match in identifier_matches:
+                    if match.activity_id not in vector_act_ids:
+                        vector_act_ids.append(match.activity_id)
+            
+            activities_to_score = self.db.query(ScheduleActivity).filter(
+                ScheduleActivity.project_id == project_id,
+                ScheduleActivity.activity_id.in_(vector_act_ids)
+            ).all()
+        else:
+            # Fallback: if vector search fails or returns empty, score all (existing deterministic behavior)
+            activities_to_score = self.db.query(ScheduleActivity).filter(ScheduleActivity.project_id == project_id).all()
 
-        if not activities:
+        if not activities_to_score:
             return event, [], None
 
-        # Precompute schedule activity embeddings in memory
-        precompute_schedule_embeddings(activities)
-
         candidate_scores_list = []
-        for act in activities:
+        for act in activities_to_score:
             scores = compute_all_candidate_scores(event, act)
+            
+            # If the candidate came from vector search, we can inject the vector similarity score
+            # However, compute_all_candidate_scores already computes semantic_score using SentenceTransformers.
+            # We will rely on compute_all_candidate_scores for the authoritative score.
+            
             candidate_scores_list.append((act, scores))
 
         # Sort descending by overall_score

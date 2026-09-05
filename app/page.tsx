@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import { apiFetch, apiFetchSafe } from '@/lib/api';
 import { useAppDataRefresh } from '@/lib/app-sync';
 import { getFallbackMetrics, getPendingFallbackReviews } from '@/lib/report-fallback';
@@ -46,7 +47,7 @@ function formatMetric(value: number | null, suffix = '') {
   return value == null ? '—' : `${value}${suffix}`;
 }
 
-export default function Dashboard() {
+function DashboardContent() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const rawProjectId = searchParams.get('project_id') ?? 'PROJ-ALPHA';
@@ -426,5 +427,13 @@ export default function Dashboard() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function Dashboard() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-64 text-on-surface-variant">Loading dashboard...</div>}>
+      <DashboardContent />
+    </Suspense>
   );
 }

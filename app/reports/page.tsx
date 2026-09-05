@@ -1,6 +1,7 @@
 'use client';
 
 import { notifyAppDataRefresh } from '@/lib/app-sync';
+import { Suspense } from 'react';
 import { formatLocalDateTime, parseServerDate } from '@/lib/date';
 import { apiFetchSafe } from '@/lib/api';
 import {
@@ -123,7 +124,7 @@ function mergeHistory(apiReports: ReportResponse[], fallbackReports: FallbackRep
   return merged.sort((a, b) => parseServerDate(b.created_at).getTime() - parseServerDate(a.created_at).getTime());
 }
 
-export default function ReportsIngestionHub() {
+function ReportsIngestionHub() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const rawProjectId = searchParams.get('project_id') ?? 'PROJ-ALPHA';
@@ -1091,5 +1092,13 @@ export default function ReportsIngestionHub() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function ReportsPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-64 text-on-surface-variant">Loading...</div>}>
+      <ReportsIngestionHub />
+    </Suspense>
   );
 }

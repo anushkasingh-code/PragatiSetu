@@ -2,6 +2,7 @@
 
 import { apiFetchSafe } from '@/lib/api';
 import { notifyAppDataRefresh, useAppDataRefresh } from '@/lib/app-sync';
+import { Suspense } from 'react';
 import {
   FALLBACK_WBS_CODE,
   getPendingFallbackReviews,
@@ -116,7 +117,7 @@ async function fetchPendingReviews(projectId: string): Promise<ReviewItem[]> {
   return fallbackItems;
 }
 
-export default function ReviewQueue() {
+function ReviewQueueContent() {
   const searchParams = useSearchParams();
   const rawProjectId = searchParams.get('project_id') ?? 'PROJ-ALPHA';
   const projectId = rawProjectId === 'PRAGATI-01' || rawProjectId === '24P201' ? 'PROJ-ALPHA' : rawProjectId;
@@ -558,5 +559,13 @@ export default function ReviewQueue() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function ReviewQueue() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-64 text-on-surface-variant">Loading review queue...</div>}>
+      <ReviewQueueContent />
+    </Suspense>
   );
 }

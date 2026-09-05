@@ -21,6 +21,11 @@ def get_embedding_model():
     _MODEL_LOADED = True
     return _MODEL_INSTANCE
 
+def is_embedding_model_degraded() -> bool:
+    """Returns True if the SentenceTransformer model failed to load and we are using hash fallbacks."""
+    get_embedding_model() # ensure attempted load
+    return _MODEL_INSTANCE is None
+
 def precompute_schedule_embeddings(activities: List[Any]) -> None:
     """Precomputes and caches vector representations for ScheduleActivity objects in memory."""
     global _SCHEDULE_EMBEDDINGS_CACHE

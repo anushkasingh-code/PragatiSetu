@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiFetchSafe } from '@/lib/api';
-import { useAppDataRefresh } from '@/lib/app-sync';
+import { useAppDataRefresh, notifyAppDataRefresh } from '@/lib/app-sync';
 import { parseServerDate } from '@/lib/date';
 import {
   Search,

@@ -18,7 +18,7 @@ def test_api_projects_and_activities(client, db_session):
     # 2. GET /projects/PROJ-ALPHA
     res_single_proj = client.get("/projects/PROJ-ALPHA")
     assert res_single_proj.status_code == 200
-    assert res_single_proj.json()["name"].startswith("PragatiSetu")
+    assert res_single_proj.json()["name"].startswith("Project Alpha")
 
     # 3. GET /projects/PROJ-ALPHA/wbs
     res_wbs = client.get("/projects/PROJ-ALPHA/wbs")

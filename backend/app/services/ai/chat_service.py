@@ -38,8 +38,6 @@ def save_groq_api_key(key: str) -> str:
     env_paths = [
         os.path.join(os.getcwd(), ".env"),
         os.path.join(os.getcwd(), "backend", ".env"),
-        r"D:\OneDrive\Desktop\PragatiSetu\PragatiSetu\.env",
-        r"D:\OneDrive\Desktop\PragatiSetu\PragatiSetu\backend\.env"
     ]
     for env_path in env_paths:
         try:
@@ -105,8 +103,6 @@ def get_effective_groq_api_key(runtime_key: Optional[str] = None) -> str:
         os.path.join(os.getcwd(), "backend", ".env"),
         os.path.join(os.path.dirname(os.getcwd()), ".env"),
         os.path.expanduser("~/.env"),
-        r"D:\OneDrive\Desktop\PragatiSetu\PragatiSetu\.env",
-        r"D:\OneDrive\Desktop\PragatiSetu\.env",
     ]
     for ep in potential_paths:
         if os.path.exists(ep):

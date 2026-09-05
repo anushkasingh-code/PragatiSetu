@@ -19,6 +19,7 @@ from backend.app.api.audit import router as audit_router
 from backend.app.api.placeholders import router as placeholders_router
 from backend.app.api.voice import router as voice_router
 from backend.app.api.ai import router as ai_router
+from backend.app.services.ai.vector_store import get_chroma_client
 
 # Configure Application Logging
 log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
@@ -112,10 +113,17 @@ def health_check(db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
         db_status = f"error: {str(e)}"
+    try:
+        client = get_chroma_client()
+        client.heartbeat()
+        vector_status = "ready"
+    except Exception as e:
+        vector_status = f"degraded: {str(e)}"
 
     return {
         "status": "ok",
         "app": settings.PROJECT_NAME,
         "environment": settings.ENVIRONMENT,
-        "database": db_status
+        "database": db_status,
+        "vector_store": vector_status
     }

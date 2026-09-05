@@ -249,7 +249,7 @@ def test_14_mocked_groq_success(db_session, ephemeral_chroma):
 
     mock_client = MagicMock()
     mock_choice = MagicMock()
-    mock_choice.message.content = '{"summary": "Matches foundation F12", "candidate_activity_ids": ["CIV-107"], "reasoning": ["Identifier F12 aligns with foundation"], "warnings": []}'
+    mock_choice.message.content = '{"summary": "Matches sand bedding", "candidate_activity_ids": ["PIP-218"], "reasoning": ["Identifier aligns with trench T1"], "warnings": []}'
     mock_client.chat.completions.create.return_value = MagicMock(choices=[mock_choice])
 
     service = GroqExplanationService(client=mock_client)
@@ -257,12 +257,12 @@ def test_14_mocked_groq_success(db_session, ephemeral_chroma):
     with patch.object(settings, "GROQ_ENABLED", True), patch.object(settings, "GROQ_API_KEY", "mock_key"):
         res = service.explain_query_context(
             project_id="PROJ-ALPHA",
-            query="Foundation F12 concreting",
+            query="Sand bedding preparation in cable trench T1",
             chroma_client=ephemeral_chroma
         )
         assert res.available is True
-        assert res.summary == "Matches foundation F12"
-        assert "CIV-107" in res.grounded_candidates
+        assert res.summary == "Matches sand bedding"
+        assert "PIP-218" in res.grounded_candidates
         assert len(res.reasoning) == 1
 
 def test_15_mocked_groq_failure_network_error(db_session, ephemeral_chroma):

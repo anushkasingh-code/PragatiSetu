@@ -1,4 +1,5 @@
 import os
+import logging
 import datetime
 import pandas as pd
 from typing import Dict, Any
@@ -13,6 +14,7 @@ from backend.app.services.validation import (
     validate_duplicate_activity_ids,
     ValidationError
 )
+from backend.app.services.ai.vector_indexer import index_schedule_activities
 
 def _normalize_project_id(pid: str) -> str:
     cleaned = str(pid).strip()
@@ -226,4 +228,15 @@ class BaselineImporter:
                 stats["activities_imported"] += 1
 
         self.db.commit()
+        
+        # Ensure ChromaDB index is up to date with the imported activities
+        try:
+            index_schedule_activities(self.db)
+        except Exception as e:
+            logging.getLogger("pragatisetu.baseline_importer").error(
+                "Chroma indexing failed during baseline import. The deterministic fallback will be used.", 
+                exc_info=True
+            )
+            stats["errors"].append(f"Failed to index activities into ChromaDB: {str(e)}")
+            
         return stats

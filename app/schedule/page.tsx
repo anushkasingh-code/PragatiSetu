@@ -19,6 +19,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useEffect, useState, useCallback } from 'react';
 import { useAppDataRefresh } from '@/lib/app-sync';
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
@@ -181,7 +182,7 @@ function statusBadgeClass(statusLabel: ScheduleRow['statusLabel']) {
   return 'px-2 py-0.5 rounded-sm text-[10px] font-bold bg-surface-container-high text-on-surface-variant border border-surface-border uppercase tracking-wide';
 }
 
-export default function Schedule() {
+function ScheduleContent() {
   const searchParams = useSearchParams();
   const rawProjectId = searchParams.get('project_id') ?? 'PROJ-ALPHA';
   const projectId = rawProjectId === 'PRAGATI-01' || rawProjectId === '24P201' ? 'PROJ-ALPHA' : rawProjectId;
@@ -706,5 +707,13 @@ export default function Schedule() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function Schedule() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-64 text-on-surface-variant">Loading schedule...</div>}>
+      <ScheduleContent />
+    </Suspense>
   );
 }

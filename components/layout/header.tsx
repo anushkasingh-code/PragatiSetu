@@ -24,8 +24,9 @@ import {
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth, DEMO_PERSONAS } from '@/lib/auth-context';
+import { apiFetchSafe } from '@/lib/api';
 
 export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
   const router = useRouter();
@@ -33,7 +34,20 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
   const [showAppLauncher, setShowAppLauncher] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [backendStatus, setBackendStatus] = useState<'checking' | 'online' | 'offline'>('checking');
   const { user, openLoginModal, openSignupModal, logout, switchDemoPersona } = useAuth();
+
+  useEffect(() => {
+    const checkHealth = async () => {
+      const res = await apiFetchSafe('/health', {}, 3000);
+      setBackendStatus(res.ok ? 'online' : 'offline');
+    };
+    checkHealth();
+    const interval = setInterval(checkHealth, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const isDemoFallback = process.env.NEXT_PUBLIC_ENABLE_DEMO_FALLBACK === 'true';
 
   const [notifications, setNotifications] = useState([
     {
@@ -104,9 +118,25 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
       </div>
 
       <div className="flex items-center gap-4">
-        <span className="hidden lg:inline-block text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider bg-surface-container-low px-3 py-1 rounded border border-surface-border">
-          PragatiSetu | Operational
+        <span className={`hidden lg:inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider px-3 py-1 rounded border ${
+          backendStatus === 'online' ? 'bg-status-completed/10 text-status-completed border-status-completed' : 
+          backendStatus === 'offline' ? 'bg-status-conflict/10 text-status-conflict border-status-conflict' : 
+          'bg-surface-container-low text-on-surface-variant border-surface-border'
+        }`}>
+          <span className={`w-2 h-2 rounded-full ${
+            backendStatus === 'online' ? 'bg-status-completed animate-pulse' : 
+            backendStatus === 'offline' ? 'bg-status-conflict' : 'bg-outline animate-pulse'
+          }`}></span>
+          {backendStatus === 'checking' ? 'Checking API...' : 
+           backendStatus === 'online' ? 'LIVE BACKEND' :
+           isDemoFallback ? 'DEMO MODE' : 'BACKEND OFFLINE'}
         </span>
+        
+        {isDemoFallback && (
+          <span className="hidden lg:inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider px-3 py-1 rounded border bg-status-conflict text-white border-status-conflict animate-pulse shadow-sm" title="Actual backend requests may be simulated">
+            OFFLINE DEMO MODE - SIMULATED RESULTS
+          </span>
+        )}
         
         <div className="flex items-center gap-2">
           {/* AI Copilot Trigger */}
@@ -310,7 +340,7 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         <h4 className="text-[14px] font-bold text-on-surface truncate">{user.name}</h4>
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-status-completed/10 text-status-completed border border-status-completed/20 shrink-0">
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-status-completed/10 text-status-completed border border-status-completed shrink-0">
                           LOGGED IN
                         </span>
                       </div>
