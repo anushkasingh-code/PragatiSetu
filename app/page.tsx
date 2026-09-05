@@ -1,9 +1,10 @@
 'use client';
 
 import { Suspense } from 'react';
-import { apiFetch, apiFetchSafe } from '@/lib/api';
+import { apiFetchSafe } from '@/lib/api';
 import { useAppDataRefresh } from '@/lib/app-sync';
 import { getFallbackMetrics, getPendingFallbackReviews } from '@/lib/report-fallback';
+import { getDeletedProjectCodes, isProjectDeleted, FALLBACK_PROJECTS } from '@/lib/projects';
 import { Eye, ArrowRight, Activity, Clock, Layers } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
@@ -18,6 +19,7 @@ type DashboardData = {
   total_events?: number;
   auto_linked_events?: number;
   human_review_events?: number;
+  unplanned_events?: number;
   conflict_events?: number;
 };
 
@@ -27,22 +29,6 @@ interface SCurvePoint {
   planned: number;
 }
 
-const DEFAULT_S_CURVE: SCurvePoint[] = [
-  { actual: 10, planned: 15, label: 'W1' },
-  { actual: 25, planned: 30, label: 'W2' },
-  { actual: 40, planned: 45, label: 'W3' },
-  { actual: 55, planned: 60, label: 'W4' },
-  { actual: 68, planned: 75, label: 'W5' },
-  { actual: 85, planned: 90, label: 'W6' },
-  { actual: 92, planned: 100, label: 'W7' },
-];
-
-const DEMO_DPR_ROWS = [
-  { id: 'RPT-8832', sup: 'J. Miller', loc: 'L5-A-North', events: 14, status: 'VALIDATED' },
-  { id: 'RPT-8831', sup: 'S. Gupta', loc: 'L5-B-South', events: 8, status: 'REVIEW REQUIRED' },
-  { id: 'RPT-8830', sup: 'A. Chen', loc: 'L6-Foundation', events: 22, status: 'VALIDATED' },
-];
-
 function formatMetric(value: number | null, suffix = '') {
   return value == null ? '—' : `${value}${suffix}`;
 }
@@ -50,8 +36,13 @@ function formatMetric(value: number | null, suffix = '') {
 function DashboardContent() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
-  const rawProjectId = searchParams.get('project_id') ?? 'PROJ-ALPHA';
-  const projectId = rawProjectId === 'PRAGATI-01' || rawProjectId === '24P201' ? 'PROJ-ALPHA' : rawProjectId;
+
+  const [activeProject, setActiveProject] = useState<{
+    project_id: string;
+    name: string;
+    displayCode: string;
+    description?: string;
+  } | null>(null);
 
   const [overallProgress, setOverallProgress] = useState<number | null>(null);
   const [aiAccuracy, setAiAccuracy] = useState<number | null>(null);
@@ -70,15 +61,67 @@ function DashboardContent() {
     loc: string;
     events: number;
     status: string;
-  }[]>(DEMO_DPR_ROWS);
-  const [sCurveData, setSCurveData] = useState<SCurvePoint[]>(DEFAULT_S_CURVE);
+  }[]>([]);
+  const [sCurveData, setSCurveData] = useState<SCurvePoint[]>([]);
 
-  const loadDashboard = useCallback(() => {
+  const resolveActiveProject = useCallback(async () => {
+    const deleted = getDeletedProjectCodes();
+    const res = await apiFetchSafe<{ project_id: string; name: string; description?: string }[]>('/projects');
+    let available: { project_id: string; name: string; displayCode: string; description?: string }[] = [];
+
+    if (res.ok && Array.isArray(res.data) && res.data.length > 0) {
+      available = res.data
+        .filter((p) => !deleted.has(p.project_id))
+        .map((p) => ({
+          project_id: p.project_id,
+          name: p.name,
+          displayCode: p.project_id === 'PROJ-ALPHA' ? '24P201' : p.project_id,
+          description: p.description,
+        }));
+    }
+
+    if (available.length === 0 && (!res.ok || res.data.length === 0)) {
+      const activeFallbacks = FALLBACK_PROJECTS.filter((p) => !deleted.has(p.code));
+      available = activeFallbacks.map((p) => ({
+        project_id: p.code,
+        name: p.name,
+        displayCode: p.displayCode,
+        description: 'PragatiSetu Infrastructure Construction Package',
+      }));
+    }
+
+    if (available.length === 0) {
+      setActiveProject(null);
+      return null;
+    }
+
+    const requestedId = searchParams.get('project_id');
+    const normalizedReq = requestedId === 'PRAGATI-01' || requestedId === '24P201' ? 'PROJ-ALPHA' : requestedId;
+    const current = (normalizedReq ? available.find((p) => p.project_id === normalizedReq) : null) || available[0];
+    setActiveProject(current);
+    return current;
+  }, [searchParams]);
+
+  const loadDashboard = useCallback(async () => {
+    const currentProj = await resolveActiveProject();
+    if (!currentProj) {
+      setOverallProgress(null);
+      setAiAccuracy(null);
+      setPendingActions(0);
+      setHumanReviewEvents(0);
+      setConflictEvents(0);
+      setActivityBreakdown(null);
+      setRecentReports([]);
+      setSCurveData([]);
+      return;
+    }
+
+    const projectId = currentProj.project_id;
     const fallbackMetrics = getFallbackMetrics();
-    const pendingFallback = getPendingFallbackReviews().length;
+    const pendingFallback = isProjectDeleted(projectId) ? 0 : getPendingFallbackReviews(projectId).length;
 
     // Fetch real reports for Recent Field Ingestions
-    apiFetchSafe<any[]>(`/projects/${projectId}/reports`).then((res) => {
+    apiFetchSafe<any[]>(`/projects/${encodeURIComponent(projectId)}/reports`).then((res) => {
       if (res.ok && Array.isArray(res.data) && res.data.length > 0) {
         const mapped = res.data.slice(0, 5).map((r) => {
           const isVoice = r.filename && r.filename.startsWith('voice_dpr_');
@@ -91,17 +134,18 @@ function DashboardContent() {
           };
         });
         setRecentReports(mapped);
+      } else {
+        setRecentReports([]);
       }
     });
 
     // Fetch live timeline to compute dynamic weekly S-Curve
-    apiFetchSafe<any>(`/projects/${projectId}/timeline`).then((res) => {
+    apiFetchSafe<any>(`/projects/${encodeURIComponent(projectId)}/timeline`).then((res) => {
       if (res.ok && res.data && Array.isArray(res.data.activities) && res.data.activities.length > 0) {
         const acts = res.data.activities;
         const total = acts.length;
         const avgActual = acts.reduce((acc: number, a: any) => acc + (a.percent_complete || 0), 0) / total;
         
-        // Generate dynamic 6-week progression grounded in real activity distribution
         const computedPoints: SCurvePoint[] = [
           { label: 'W1', planned: Math.min(100, Math.round(avgActual * 0.2)), actual: Math.min(100, Math.round(avgActual * 0.25)) },
           { label: 'W2', planned: Math.min(100, Math.round(avgActual * 0.45)), actual: Math.min(100, Math.round(avgActual * 0.5)) },
@@ -111,17 +155,20 @@ function DashboardContent() {
           { label: 'W6', planned: Math.min(100, Math.round(avgActual * 1.25)), actual: Math.min(100, Math.round(avgActual * 1.05)) },
         ];
         setSCurveData(computedPoints);
+      } else {
+        setSCurveData([]);
       }
     });
 
-    apiFetch<DashboardData>(`/projects/${projectId}/dashboard`)
-      .then((data) => {
+    apiFetchSafe<DashboardData>(`/projects/${encodeURIComponent(projectId)}/dashboard`).then((dashRes) => {
+      if (dashRes.ok && dashRes.data) {
+        const data = dashRes.data;
         if (data.progress_percentage != null && data.progress_percentage > 0) {
           setOverallProgress(data.progress_percentage);
         } else if (data.total_activities != null && data.total_activities > 0 && data.completed_activities != null) {
           setOverallProgress(Math.round((data.completed_activities / data.total_activities) * 1000) / 10);
         } else {
-          setOverallProgress(null);
+          setOverallProgress(0);
         }
 
         if (data.total_events != null && data.total_events > 0 && data.auto_linked_events != null) {
@@ -134,7 +181,7 @@ function DashboardContent() {
           setAiAccuracy(null);
         }
 
-        const humanReviews = (data.human_review_events ?? 0) + pendingFallback;
+        const humanReviews = (data.human_review_events ?? 0) + (data.unplanned_events ?? 0) + pendingFallback;
         const conflicts = data.conflict_events ?? 0;
         setHumanReviewEvents(humanReviews);
         setConflictEvents(conflicts);
@@ -149,28 +196,29 @@ function DashboardContent() {
         } else {
           setActivityBreakdown(null);
         }
-      })
-      .catch(() => {
-        const pendingFallbackOnly = getPendingFallbackReviews().length;
-        if (pendingFallbackOnly > 0) {
-          setHumanReviewEvents(pendingFallbackOnly);
-          setPendingActions(pendingFallbackOnly);
-        } else {
-          setOverallProgress(null);
-          setAiAccuracy(null);
-          setPendingActions(null);
-          setHumanReviewEvents(null);
-          setConflictEvents(null);
-          setActivityBreakdown(null);
-        }
-      });
-  }, [projectId]);
+      } else {
+        setOverallProgress(0);
+        setAiAccuracy(null);
+        setPendingActions(0);
+        setHumanReviewEvents(0);
+        setConflictEvents(0);
+        setActivityBreakdown(null);
+      }
+    });
+  }, [resolveActiveProject]);
 
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard, pathname]);
 
   useAppDataRefresh(loadDashboard);
+
+  const currentCode = activeProject?.project_id ?? '';
+  const displayCode = activeProject?.displayCode ?? '—';
+  const projectName = activeProject?.name ?? 'No Active Project';
+  const projectDesc = activeProject
+    ? (activeProject.description || 'Infrastructure Construction Package')
+    : 'No active project selected. Visit the Projects Directory to create or select a project.';
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -182,16 +230,14 @@ function DashboardContent() {
               PragatiSetu Infrastructure Dashboard
             </span>
             <span className="text-[11px] font-mono text-on-surface-variant bg-surface-container-low px-2 py-0.5 rounded border border-surface-border font-semibold">
-              {projectId === 'PROJ-BETA' ? 'PROJ-BETA' : '24P201'}
+              {displayCode}
             </span>
           </div>
           <h1 className="text-[24px] font-bold text-on-surface leading-tight">
-            {projectId === 'PROJ-BETA' ? 'Project Beta' : 'Project Alpha'}
+            {projectName}
           </h1>
           <p className="text-[13px] text-on-surface-variant">
-            {projectId === 'PROJ-BETA'
-              ? 'Compressor Station & High-Pressure Utility Upgrade'
-              : 'Pump, Pipeline & Utility Expansion — Sector 4 Pipeline'}
+            {projectDesc}
           </p>
         </div>
 
@@ -203,7 +249,7 @@ function DashboardContent() {
             Switch Project
           </Link>
           <Link
-            href={`/schedule?project_id=${encodeURIComponent(projectId)}`}
+            href={currentCode ? `/schedule?project_id=${encodeURIComponent(currentCode)}` : '/schedule'}
             className="px-3 py-1.5 bg-primary text-on-primary text-[12px] font-bold rounded-lg hover:bg-primary/90 transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
           >
             Live Schedule
@@ -218,7 +264,10 @@ function DashboardContent() {
           <div>
             <div className="flex items-center justify-between mb-2">
               <p className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">Overall Progress</p>
-              <Link href={`/schedule?project_id=${encodeURIComponent(projectId)}`} className="text-[11px] font-bold text-primary hover:underline">
+              <Link
+                href={currentCode ? `/schedule?project_id=${encodeURIComponent(currentCode)}` : '/schedule'}
+                className="text-[11px] font-bold text-primary hover:underline"
+              >
                 View Schedule →
               </Link>
             </div>
@@ -247,7 +296,10 @@ function DashboardContent() {
           <div>
             <div className="flex items-center justify-between mb-2">
               <p className="text-[11px] font-semibold text-status-review uppercase tracking-wider">Pending Actions</p>
-              <Link href="/review-queue" className="text-[11px] font-bold text-status-review hover:underline">
+              <Link
+                href={currentCode ? `/review-queue?project_id=${encodeURIComponent(currentCode)}` : '/review-queue'}
+                className="text-[11px] font-bold text-status-review hover:underline"
+              >
                 Review Queue →
               </Link>
             </div>
@@ -283,23 +335,29 @@ function DashboardContent() {
           </div>
 
           <div className="h-64 relative flex items-end justify-between px-4 pb-6 border-b border-surface-border">
-            {sCurveData.map((week, i) => (
-              <div key={i} className="w-10 flex flex-col justify-end h-full relative group cursor-pointer" title={`${week.label}: Actual ${week.actual}% | Planned ${week.planned}%`}>
-                {week.planned > 0 && (
-                  <div
-                    className="absolute bottom-0 w-full bg-surface-variant rounded-t-sm opacity-60 transition-all duration-300"
-                    style={{ height: `${week.planned}%` }}
-                  ></div>
-                )}
-                <div
-                  className="w-full bg-primary rounded-t-sm relative z-10 transition-all duration-300 group-hover:bg-primary/90"
-                  style={{ height: `${week.actual}%` }}
-                ></div>
-                <div className="absolute -bottom-6 w-full text-center text-[11px] font-semibold text-outline">
-                  {week.label}
-                </div>
+            {sCurveData.length === 0 ? (
+              <div className="w-full h-full flex flex-col items-center justify-center text-[13px] text-on-surface-variant">
+                <span>No progress timeline recorded for this project yet.</span>
               </div>
-            ))}
+            ) : (
+              sCurveData.map((week, i) => (
+                <div key={i} className="w-10 flex flex-col justify-end h-full relative group cursor-pointer" title={`${week.label}: Actual ${week.actual}% | Planned ${week.planned}%`}>
+                  {week.planned > 0 && (
+                    <div
+                      className="absolute bottom-0 w-full bg-surface-variant rounded-t-sm opacity-60 transition-all duration-300"
+                      style={{ height: `${week.planned}%` }}
+                    ></div>
+                  )}
+                  <div
+                    className="w-full bg-primary rounded-t-sm relative z-10 transition-all duration-300 group-hover:bg-primary/90"
+                    style={{ height: `${week.actual}%` }}
+                  ></div>
+                  <div className="absolute -bottom-6 w-full text-center text-[11px] font-semibold text-outline">
+                    {week.label}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
@@ -383,45 +441,53 @@ function DashboardContent() {
               </tr>
             </thead>
             <tbody className="text-[14px] text-on-surface">
-              {recentReports.map((row, i) => (
-                <tr
-                  key={i}
-                  className="hover:bg-audit-previous transition-colors group border-b border-surface-border last:border-0"
-                >
-                  <td className="px-4 py-3 font-mono text-[13px]">{row.id}</td>
-                  <td className="px-4 py-3">{row.sup}</td>
-                  <td className="px-4 py-3 font-mono text-[13px]">{row.loc}</td>
-                  <td className="px-4 py-3">{row.events}</td>
-                  <td className="px-4 py-3">
-                    {row.status === 'VALIDATED' || row.status === 'PROCESSED' ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[11px] font-bold uppercase tracking-wide bg-status-completed/10 text-status-completed border border-status-completed/20">
-                        {row.status}
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[11px] font-bold uppercase tracking-wide bg-status-review/10 text-status-review border border-status-review/20">
-                        {row.status}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {row.status === 'VALIDATED' || row.status === 'PROCESSED' ? (
-                      <Link
-                        href="/audit-trail"
-                        className="inline-block text-outline hover:text-primary transition-colors p-1"
-                      >
-                        <Eye size={18} />
-                      </Link>
-                    ) : (
-                      <Link
-                        href="/review-queue"
-                        className="inline-block text-primary text-[12px] font-bold px-4 py-1.5 rounded-lg border border-primary/20 hover:bg-primary/5 transition-colors"
-                      >
-                        Review
-                      </Link>
-                    )}
+              {recentReports.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-[13px] text-on-surface-variant">
+                    No recent field reports ingested yet for this project.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                recentReports.map((row, i) => (
+                  <tr
+                    key={i}
+                    className="hover:bg-audit-previous transition-colors group border-b border-surface-border last:border-0"
+                  >
+                    <td className="px-4 py-3 font-mono text-[13px]">{row.id}</td>
+                    <td className="px-4 py-3">{row.sup}</td>
+                    <td className="px-4 py-3 font-mono text-[13px]">{row.loc}</td>
+                    <td className="px-4 py-3">{row.events}</td>
+                    <td className="px-4 py-3">
+                      {row.status === 'VALIDATED' || row.status === 'PROCESSED' ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[11px] font-bold uppercase tracking-wide bg-status-completed/10 text-status-completed border border-status-completed/20">
+                          {row.status}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[11px] font-bold uppercase tracking-wide bg-status-review/10 text-status-review border border-status-review/20">
+                          {row.status}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {row.status === 'VALIDATED' || row.status === 'PROCESSED' ? (
+                        <Link
+                          href="/audit-trail"
+                          className="inline-block text-outline hover:text-primary transition-colors p-1"
+                        >
+                          <Eye size={18} />
+                        </Link>
+                      ) : (
+                        <Link
+                          href={currentCode ? `/review-queue?project_id=${encodeURIComponent(currentCode)}` : '/review-queue'}
+                          className="inline-block text-primary text-[12px] font-bold px-4 py-1.5 rounded-lg border border-primary/20 hover:bg-primary/5 transition-colors"
+                        >
+                          Review
+                        </Link>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

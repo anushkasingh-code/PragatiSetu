@@ -12,6 +12,8 @@ class DecisionEnum(str, enum.Enum):
     UNPLANNED_REVIEW = "UNPLANNED_REVIEW"
     CONFLICT_REVIEW = "CONFLICT_REVIEW"
     IGNORE = "IGNORE"
+    UNPLANNED = "UNPLANNED"
+    REJECT = "REJECT"
 
 class MatchDecision(Base):
     __tablename__ = "match_decisions"

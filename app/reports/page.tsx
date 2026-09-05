@@ -1,6 +1,6 @@
 'use client';
 
-import { notifyAppDataRefresh } from '@/lib/app-sync';
+import { notifyAppDataRefresh, useAppDataRefresh } from '@/lib/app-sync';
 import { Suspense } from 'react';
 import { formatLocalDateTime, parseServerDate } from '@/lib/date';
 import { apiFetchSafe } from '@/lib/api';
@@ -14,6 +14,7 @@ import {
   type FallbackReportRecord,
 } from '@/lib/report-fallback';
 import { looksLikeSiteReport, readFileAsText } from '@/lib/report-validation';
+import { getDeletedProjectCodes, isProjectDeleted, FALLBACK_PROJECTS } from '@/lib/projects';
 import {
   UploadCloud,
   Mic,
@@ -127,8 +128,50 @@ function mergeHistory(apiReports: ReportResponse[], fallbackReports: FallbackRep
 function ReportsIngestionHub() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const rawProjectId = searchParams.get('project_id') ?? 'PROJ-ALPHA';
-  const projectId = rawProjectId === 'PRAGATI-01' || rawProjectId === '24P201' ? 'PROJ-ALPHA' : rawProjectId;
+
+  const [activeProject, setActiveProject] = useState<{ project_id: string; name: string; displayCode: string } | null>(null);
+
+  const resolveActiveProject = useCallback(async () => {
+    const deleted = getDeletedProjectCodes();
+    const res = await apiFetchSafe<{ project_id: string; name: string; description?: string }[]>('/projects');
+    let available: { project_id: string; name: string; displayCode: string }[] = [];
+
+    if (res.ok && Array.isArray(res.data) && res.data.length > 0) {
+      available = res.data
+        .filter((p) => !deleted.has(p.project_id))
+        .map((p) => ({
+          project_id: p.project_id,
+          name: p.name,
+          displayCode: p.project_id === 'PROJ-ALPHA' ? '24P201' : p.project_id,
+        }));
+    }
+
+    if (available.length === 0 && (!res.ok || res.data.length === 0)) {
+      const activeFallbacks = FALLBACK_PROJECTS.filter((p) => !deleted.has(p.code));
+      available = activeFallbacks.map((p) => ({
+        project_id: p.code,
+        name: p.name,
+        displayCode: p.displayCode,
+      }));
+    }
+
+    if (available.length === 0) {
+      setActiveProject(null);
+      return null;
+    }
+
+    const requestedId = searchParams.get('project_id');
+    const normalizedReq = requestedId === 'PRAGATI-01' || requestedId === '24P201' ? 'PROJ-ALPHA' : requestedId;
+    const current = (normalizedReq ? available.find((p) => p.project_id === normalizedReq) : null) || available[0];
+    setActiveProject(current);
+    return current;
+  }, [searchParams]);
+
+  useEffect(() => {
+    void resolveActiveProject();
+  }, [resolveActiveProject]);
+
+  useAppDataRefresh(resolveActiveProject);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -178,11 +221,16 @@ function ReportsIngestionHub() {
   );
 
   const fetchHistory = useCallback(async () => {
-    const fallback = getFallbackReports();
-    const apiResult = await apiFetchSafe<ReportResponse[]>(`/projects/${projectId}/reports`);
-    const apiReports = apiResult.ok ? apiResult.data : [];
+    if (!activeProject || isProjectDeleted(activeProject.project_id)) {
+      setHistory([]);
+      return;
+    }
+    const currentId = activeProject.project_id;
+    const fallback = getFallbackReports(currentId);
+    const apiResult = await apiFetchSafe<ReportResponse[]>(`/projects/${currentId}/reports`);
+    const apiReports = apiResult.ok && Array.isArray(apiResult.data) ? apiResult.data : [];
     setHistory(mergeHistory(apiReports, fallback));
-  }, [projectId]);
+  }, [activeProject]);
 
   useEffect(() => {
     void fetchHistory();
@@ -228,13 +276,13 @@ function ReportsIngestionHub() {
       updateStep('extract', { status: 'done', progress: 100 });
       updateStep('match', { status: 'done', progress: 100 });
 
-      if (fallback) {
-        persistFallbackProcessing(activeReportId, filename);
+      if (fallback && activeProject && !isProjectDeleted(activeProject.project_id)) {
+        persistFallbackProcessing(activeReportId, filename, activeProject.project_id);
         setHistory((prev) => {
-          const record = createFallbackReportRecord(activeReportId, filename);
+          const record = createFallbackReportRecord(activeReportId, filename, activeProject.project_id);
           return mergeHistory(
             prev.filter((r): r is ReportResponse => !('isFallback' in r)),
-            [record, ...getFallbackReports()],
+            [record, ...getFallbackReports(activeProject.project_id)],
           );
         });
       }
@@ -398,6 +446,16 @@ function ReportsIngestionHub() {
     setUsedFallback(false);
     pipelineCompleteRef.current = false;
 
+    const currentProj = activeProject || (await resolveActiveProject());
+    if (!currentProj || isProjectDeleted(currentProj.project_id)) {
+      setUploadStatus('error');
+      setIsPipelineActive(false);
+      setContentWarning(
+        'No active project found. Please create or select an active project in the Projects Directory before uploading reports.',
+      );
+      return;
+    }
+
     const fileText = await readFileAsText(fileToUpload);
     const validation = looksLikeSiteReport(fileText, fileToUpload.name);
     let forceFallback = !validation.isValid;
@@ -433,13 +491,27 @@ function ReportsIngestionHub() {
       body: (() => {
         const formData = new FormData();
         formData.append('file', fileToUpload);
-        formData.append('project_id', projectId);
+        formData.append('project_id', currentProj.project_id);
         formData.append('report_date', new Date().toISOString().slice(0, 10));
         return formData;
       })(),
     });
 
     if (!uploadResult.ok) {
+      if (
+        uploadResult.error?.includes('does not exist') ||
+        uploadResult.error?.includes('not found') ||
+        uploadResult.status === 404 ||
+        isProjectDeleted(currentProj.project_id)
+      ) {
+        setUploadStatus('error');
+        setIsPipelineActive(false);
+        setContentWarning(
+          `Upload rejected by server: ${uploadResult.error}. Please create or select an active project in the Projects Directory.`,
+        );
+        return;
+      }
+
       forceFallback = true;
       setContentWarning(
         `Upload rejected by server (${uploadResult.error}). Processing deterministic demo fallback instead.`,
@@ -650,7 +722,7 @@ function ReportsIngestionHub() {
             PragatiSetu Ingestion
           </span>
           <span className="text-[11px] font-mono text-on-surface-variant bg-surface-container-low px-2 py-0.5 rounded border border-surface-border font-semibold">
-            Project Alpha (24P201)
+            {activeProject ? `${activeProject.name} (${activeProject.displayCode})` : 'No Active Project'}
           </span>
         </div>
         <h2 className="text-[24px] font-semibold text-on-surface mb-1">Report Ingestion Hub</h2>

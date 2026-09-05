@@ -1,7 +1,10 @@
+import { isProjectDeleted } from './projects';
+
 export const FALLBACK_WBS_CODE = 'PIP-204-017';
 
 export type FallbackReportRecord = {
   report_id: string;
+  project_id?: string;
   filename: string;
   processing_status: string;
   created_at: string;
@@ -17,6 +20,7 @@ export type FallbackCandidate = {
 export type FallbackReviewRecord = {
   event_id: string;
   report_id: string;
+  project_id?: string;
   raw_text: string;
   identifier: string;
   action: string;
@@ -70,11 +74,12 @@ export function buildFallbackExtraction(reportId: string) {
   };
 }
 
-export function createFallbackReview(reportId: string, filename: string): FallbackReviewRecord {
+export function createFallbackReview(reportId: string, filename: string, projectId?: string): FallbackReviewRecord {
   const eventId = `EVT-DEMO-${reportId.slice(-8)}`;
   return {
     event_id: eventId,
     report_id: reportId,
+    project_id: projectId,
     raw_text: `Supervisor field update: ${FALLBACK_WBS_CODE} spool erection completed at Rack B. Demo record synthesized from "${filename}" — original file did not match site report schema.`,
     identifier: FALLBACK_WBS_CODE,
     action: 'Completed',
@@ -96,9 +101,10 @@ export function createFallbackReview(reportId: string, filename: string): Fallba
   };
 }
 
-export function createFallbackReportRecord(reportId: string, filename: string): FallbackReportRecord {
+export function createFallbackReportRecord(reportId: string, filename: string, projectId?: string): FallbackReportRecord {
   return {
     report_id: reportId,
+    project_id: projectId,
     filename,
     processing_status: 'PROCESSED',
     created_at: new Date().toISOString(),
@@ -111,12 +117,38 @@ export function persistFallbackReview(record: FallbackReviewRecord) {
   writeJson(REVIEWS_KEY, [record, ...existing.filter((r) => r.event_id !== record.event_id)].slice(0, 50));
 }
 
-export function getFallbackReviews(): FallbackReviewRecord[] {
-  return readJson<FallbackReviewRecord[]>(REVIEWS_KEY, []);
+export function clearFallbackData(projectId?: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (!projectId) {
+      sessionStorage.removeItem(REVIEWS_KEY);
+      sessionStorage.removeItem(REPORTS_KEY);
+      sessionStorage.removeItem(METRICS_KEY);
+      return;
+    }
+    const reviews = getFallbackReviews().filter((r) => r.project_id && r.project_id !== projectId);
+    writeJson(REVIEWS_KEY, reviews);
+    const reports = getFallbackReports().filter((r) => r.project_id && r.project_id !== projectId);
+    writeJson(REPORTS_KEY, reports);
+    if (reviews.length === 0) {
+      sessionStorage.removeItem(METRICS_KEY);
+    }
+  } catch {}
 }
 
-export function getPendingFallbackReviews(): FallbackReviewRecord[] {
-  return getFallbackReviews().filter((r) => !r.resolved);
+export function getFallbackReviews(projectId?: string): FallbackReviewRecord[] {
+  if (projectId && isProjectDeleted(projectId)) return [];
+  const alphaDeleted = isProjectDeleted('PROJ-ALPHA');
+  return readJson<FallbackReviewRecord[]>(REVIEWS_KEY, []).filter((r) => {
+    if (r.project_id && isProjectDeleted(r.project_id)) return false;
+    if (!r.project_id && alphaDeleted) return false;
+    if (projectId && r.project_id && r.project_id !== projectId) return false;
+    return true;
+  });
+}
+
+export function getPendingFallbackReviews(projectId?: string): FallbackReviewRecord[] {
+  return getFallbackReviews(projectId).filter((r) => !r.resolved);
 }
 
 export function resolveFallbackReview(eventId: string) {
@@ -136,8 +168,15 @@ export function persistFallbackReport(record: FallbackReportRecord) {
   writeJson(REPORTS_KEY, [record, ...existing.filter((r) => r.report_id !== record.report_id)].slice(0, 50));
 }
 
-export function getFallbackReports(): FallbackReportRecord[] {
-  return readJson<FallbackReportRecord[]>(REPORTS_KEY, []);
+export function getFallbackReports(projectId?: string): FallbackReportRecord[] {
+  if (projectId && isProjectDeleted(projectId)) return [];
+  const alphaDeleted = isProjectDeleted('PROJ-ALPHA');
+  return readJson<FallbackReportRecord[]>(REPORTS_KEY, []).filter((r) => {
+    if (r.project_id && isProjectDeleted(r.project_id)) return false;
+    if (!r.project_id && alphaDeleted) return false;
+    if (projectId && r.project_id && r.project_id !== projectId) return false;
+    return true;
+  });
 }
 
 export function incrementFallbackMetrics() {
@@ -157,9 +196,9 @@ export function getFallbackMetrics(): FallbackMetrics {
   });
 }
 
-export function persistFallbackProcessing(reportId: string, filename: string) {
-  persistFallbackReview(createFallbackReview(reportId, filename));
-  persistFallbackReport(createFallbackReportRecord(reportId, filename));
+export function persistFallbackProcessing(reportId: string, filename: string, projectId?: string) {
+  persistFallbackReview(createFallbackReview(reportId, filename, projectId));
+  persistFallbackReport(createFallbackReportRecord(reportId, filename, projectId));
   incrementFallbackMetrics();
 }
 

@@ -9,7 +9,8 @@ from backend.app.services.normalizer_service import (
     normalize_identifier,
     normalize_action,
     normalize_object,
-    normalize_location
+    normalize_location,
+    normalize_project_id
 )
 from backend.app.services.embedding_service import precompute_schedule_embeddings, is_embedding_model_degraded
 from backend.app.services.candidate_scorer import compute_all_candidate_scores
@@ -40,7 +41,11 @@ class CandidateGeneratorService:
         if not report:
             raise ValueError(f"SourceReport with ID '{event.report_id}' not found.")
 
-        project_id = report.project_id
+        project_id = normalize_project_id(
+            report.project_id,
+            event_raw_text=event.raw_text,
+            db=self.db
+        )
         activities_to_score = []
         
         # Construct semantic query

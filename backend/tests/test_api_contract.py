@@ -147,6 +147,30 @@ def test_8_human_review_reject(client, db_session):
     assert body["decision"] == "REJECT"
     assert body["applied"] is False
 
+def test_8b_human_review_unplanned(client, db_session):
+    from backend.app.db.models.decision import MatchDecision
+    create_event(db_session, event_id="EVT-REV-UNPLANNED")
+    res = client.post("/reviews/EVT-REV-UNPLANNED/decision", json={
+        "decision": "UNPLANNED",
+        "reason": "Marked as unplanned event by planner"
+    })
+    assert res.status_code == 200
+    body = res.json()
+    assert body["decision"] == "UNPLANNED"
+    assert body["applied"] is False
+
+    # Verify decision in DB is persisted as UNPLANNED
+    dec = db_session.query(MatchDecision).filter(MatchDecision.event_id == "EVT-REV-UNPLANNED").first()
+    assert dec is not None
+    assert dec.decision == "UNPLANNED"
+    assert dec.top_activity_id is None
+
+    # Verify it is removed from pending reviews
+    pending_res = client.get("/projects/PROJ-ALPHA/reviews/pending")
+    assert pending_res.status_code == 200
+    pending_ids = [item["event"]["event_id"] for item in pending_res.json()]
+    assert "EVT-REV-UNPLANNED" not in pending_ids
+
 def test_9_standardized_error_format(client):
     res = client.get("/projects/NONEXISTENT-PROJ-ID")
     assert res.status_code == 404

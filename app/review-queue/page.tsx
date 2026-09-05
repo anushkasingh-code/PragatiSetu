@@ -9,6 +9,7 @@ import {
   resolveFallbackReview,
   type FallbackReviewRecord,
 } from '@/lib/report-fallback';
+import { getDeletedProjectCodes, isProjectDeleted, FALLBACK_PROJECTS } from '@/lib/projects';
 import {
   Filter,
   Mic,
@@ -106,21 +107,32 @@ function fallbackToReviewItem(record: FallbackReviewRecord): ReviewItem {
 }
 
 async function fetchPendingReviews(projectId: string): Promise<ReviewItem[]> {
+  if (!projectId || isProjectDeleted(projectId)) {
+    return [];
+  }
   // 1. Fetch live pending reviews from fast aggregated backend endpoint
-  const pendingRes = await apiFetchSafe<ReviewItem[]>(`/projects/${projectId}/reviews/pending`);
-  if (pendingRes.ok && Array.isArray(pendingRes.data) && pendingRes.data.length > 0) {
-    return pendingRes.data;
+  const pendingRes = await apiFetchSafe<ReviewItem[]>(`/projects/${encodeURIComponent(projectId)}/reviews/pending?limit=1000`);
+  if (pendingRes.ok && Array.isArray(pendingRes.data)) {
+    if (pendingRes.data.length > 0) {
+      return pendingRes.data;
+    }
+    // Only return fallback items specifically created for this project
+    return getPendingFallbackReviews(projectId).map(fallbackToReviewItem);
   }
 
-  // 2. Fallback to session items if backend returned empty
-  const fallbackItems = getPendingFallbackReviews().map(fallbackToReviewItem);
+  // 2. If network failed, only fallback if project is not deleted
+  const fallbackItems = getPendingFallbackReviews(projectId).map(fallbackToReviewItem);
   return fallbackItems;
 }
 
 function ReviewQueueContent() {
   const searchParams = useSearchParams();
-  const rawProjectId = searchParams.get('project_id') ?? 'PROJ-ALPHA';
-  const projectId = rawProjectId === 'PRAGATI-01' || rawProjectId === '24P201' ? 'PROJ-ALPHA' : rawProjectId;
+
+  const [activeProject, setActiveProject] = useState<{
+    project_id: string;
+    name: string;
+    displayCode: string;
+  } | null>(null);
 
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -132,24 +144,63 @@ function ReviewQueueContent() {
   const [modifyNote, setModifyNote] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  const resolveActiveProject = useCallback(async () => {
+    const deleted = getDeletedProjectCodes();
+    const res = await apiFetchSafe<{ project_id: string; name: string; description?: string }[]>('/projects');
+    let available: { project_id: string; name: string; displayCode: string }[] = [];
+
+    if (res.ok && Array.isArray(res.data) && res.data.length > 0) {
+      available = res.data
+        .filter((p) => !deleted.has(p.project_id))
+        .map((p) => ({
+          project_id: p.project_id,
+          name: p.name,
+          displayCode: p.project_id === 'PROJ-ALPHA' ? '24P201' : p.project_id,
+        }));
+    }
+
+    if (available.length === 0 && (!res.ok || res.data.length === 0)) {
+      const activeFallbacks = FALLBACK_PROJECTS.filter((p) => !deleted.has(p.code));
+      available = activeFallbacks.map((p) => ({
+        project_id: p.code,
+        name: p.name,
+        displayCode: p.displayCode,
+      }));
+    }
+
+    if (available.length === 0) {
+      setActiveProject(null);
+      return null;
+    }
+
+    const requestedId = searchParams.get('project_id');
+    const normalizedReq = requestedId === 'PRAGATI-01' || requestedId === '24P201' ? 'PROJ-ALPHA' : requestedId;
+    const current = (normalizedReq ? available.find((p) => p.project_id === normalizedReq) : null) || available[0];
+    setActiveProject(current);
+    return current;
+  }, [searchParams]);
+
   const loadQueue = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const pending = await fetchPendingReviews(projectId);
+      const currentProj = await resolveActiveProject();
+      if (!currentProj) {
+        setItems([]);
+        setCurrentIndex(0);
+        return;
+      }
+      const pending = await fetchPendingReviews(currentProj.project_id);
       setItems(pending);
       setCurrentIndex((prev) => (pending.length === 0 ? 0 : Math.min(prev, pending.length - 1)));
     } catch {
-      const fallbackOnly = getPendingFallbackReviews().map(fallbackToReviewItem);
-      setItems(fallbackOnly);
+      setItems([]);
       setCurrentIndex(0);
-      if (fallbackOnly.length === 0) {
-        setError('Failed to load review queue.');
-      }
+      setError('Failed to load review queue.');
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [resolveActiveProject]);
 
   useEffect(() => {
     void loadQueue();
@@ -169,7 +220,7 @@ function ReviewQueueContent() {
   }, [currentIndex, currentItem?.event.event_id]);
 
   const handleDecision = async (
-    decision: 'ACCEPT' | 'REJECT',
+    decision: 'ACCEPT' | 'REJECT' | 'UNPLANNED',
     overrideActivityId?: string,
     overrideReason?: string
   ) => {
@@ -178,10 +229,21 @@ function ReviewQueueContent() {
     setError(null);
     try {
       const chosenActivityId = overrideActivityId || activeActivityId;
-      const chosenReason = overrideReason || (decision === 'ACCEPT' ? 'Planner confirmed match' : 'Planner rejected match');
+      const chosenReason =
+        overrideReason ||
+        (decision === 'ACCEPT'
+          ? 'Planner confirmed match'
+          : decision === 'UNPLANNED'
+          ? 'Planner marked as unplanned event'
+          : 'Planner rejected match');
 
       if (currentItem.isFallback) {
         resolveFallbackReview(currentItem.event.event_id);
+        setItems((prev) => {
+          const next = prev.filter((it) => it.event.event_id !== currentItem.event.event_id);
+          setCurrentIndex((idx) => (next.length === 0 ? 0 : Math.min(idx, next.length - 1)));
+          return next;
+        });
         notifyAppDataRefresh({ source: 'review-queue' });
         await loadQueue();
         return;
@@ -201,6 +263,11 @@ function ReviewQueueContent() {
         setError(`Review action failed: ${result.error}`);
         return;
       }
+      setItems((prev) => {
+        const next = prev.filter((it) => it.event.event_id !== currentItem.event.event_id);
+        setCurrentIndex((idx) => (next.length === 0 ? 0 : Math.min(idx, next.length - 1)));
+        return next;
+      });
       notifyAppDataRefresh({ source: 'review-queue' });
       await loadQueue();
     } catch {
@@ -238,7 +305,7 @@ function ReviewQueueContent() {
               PragatiSetu Validation
             </span>
             <span className="text-[11px] font-mono text-on-surface-variant bg-surface-container-low px-2 py-0.5 rounded border border-surface-border font-semibold">
-              Project Alpha (24P201)
+              {activeProject ? `${activeProject.name} (${activeProject.displayCode})` : 'No Active Project'}
             </span>
           </div>
           <h2 className="text-[24px] font-semibold text-on-surface">Review Queue</h2>
@@ -346,9 +413,9 @@ function ReviewQueueContent() {
 
               <div className="mt-auto pt-6">
                 <button
-                  onClick={() => void handleDecision('REJECT')}
+                  onClick={() => void handleDecision('UNPLANNED')}
                   disabled={actionLoading}
-                  className="w-full py-2.5 bg-surface-container-low hover:bg-surface-container-high border border-surface-border rounded-lg text-on-surface text-[14px] font-bold transition-colors flex items-center justify-center gap-2 disabled:opacity-70"
+                  className="w-full py-2.5 bg-surface-container-low hover:bg-surface-container-high border border-surface-border rounded-lg text-on-surface text-[14px] font-bold transition-colors flex items-center justify-center gap-2 disabled:opacity-70 cursor-pointer"
                 >
                   <AlertTriangle size={18} /> Mark as Unplanned Event
                 </button>

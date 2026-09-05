@@ -1,15 +1,12 @@
 'use client';
 
 import { apiFetch, apiFetchSafe } from '@/lib/api';
-import { Folder, ArrowRight, Plus, X, Loader2, CheckCircle2, Building2 } from 'lucide-react';
+import { Folder, ArrowRight, Plus, X, Loader2, CheckCircle2, Building2, Trash2, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState, useCallback } from 'react';
 import { useAppDataRefresh, notifyAppDataRefresh } from '@/lib/app-sync';
-
-const FALLBACK_PROJECTS = [
-  { name: 'Project Alpha', code: 'PROJ-ALPHA', displayCode: '24P201', status: 'Operational', progress: 31.3 },
-  { name: 'Project Beta', code: 'PROJ-BETA', displayCode: 'PROJ-BETA', status: 'Planning', progress: 0.0 },
-];
+import { getDeletedProjectCodes, recordDeletedProjectCode, unrecordDeletedProjectCode, FALLBACK_PROJECTS } from '@/lib/projects';
+import { clearFallbackData } from '@/lib/report-fallback';
 
 export default function Projects() {
   const [projects, setProjects] = useState(FALLBACK_PROJECTS);
@@ -19,12 +16,18 @@ export default function Projects() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  const [projectToDelete, setProjectToDelete] = useState<{ code: string; name: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   const fetchProjects = useCallback(() => {
+    const deleted = getDeletedProjectCodes();
     apiFetch<{ project_id: string; name: string; description?: string; created_at?: string; status?: string; progress_percentage?: number }[]>('/projects')
       .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setProjects(
-            data.map((p) => {
+        if (Array.isArray(data)) {
+          const apiProjects = data
+            .filter((p) => !deleted.has(p.project_id))
+            .map((p) => {
               const isAlpha = p.project_id === 'PROJ-ALPHA' || p.name.includes('Project Alpha');
               const displayStatus = p.status && p.status !== 'N/A' ? p.status : isAlpha ? 'Operational' : 'Planning';
               return {
@@ -34,12 +37,21 @@ export default function Projects() {
                 status: displayStatus,
                 progress: p.progress_percentage != null ? p.progress_percentage : isAlpha ? 31.3 : 0,
               };
-            })
-          );
+            });
+
+          if (apiProjects.length > 0) {
+            setProjects(apiProjects);
+          } else if (data.length > 0) {
+            setProjects([]);
+          } else {
+            const activeFallbacks = FALLBACK_PROJECTS.filter((p) => !deleted.has(p.code));
+            setProjects(activeFallbacks);
+          }
         }
       })
       .catch(() => {
-        // fetch failed — keep fallback
+        const activeFallbacks = FALLBACK_PROJECTS.filter((p) => !deleted.has(p.code));
+        setProjects(activeFallbacks);
       });
   }, []);
 
@@ -71,6 +83,7 @@ export default function Projects() {
       });
 
       if (res.ok) {
+        unrecordDeletedProjectCode(generatedId);
         setFeedback({ type: 'success', message: `Project "${newProjName.trim()}" created successfully!` });
         notifyAppDataRefresh({ source: 'projects' });
         fetchProjects();
@@ -87,6 +100,48 @@ export default function Projects() {
       setFeedback({ type: 'error', message: 'Network error creating project.' });
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteProject = async () => {
+    if (!projectToDelete || isDeleting) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      const res = await apiFetchSafe(`/projects/${encodeURIComponent(projectToDelete.code)}`, {
+        method: 'DELETE',
+      });
+
+      if (res.ok || res.status === 404 || res.error?.includes('not found')) {
+        recordDeletedProjectCode(projectToDelete.code);
+        clearFallbackData(projectToDelete.code);
+        setProjects((prev) => {
+          const next = prev.filter((p) => p.code !== projectToDelete.code);
+          if (next.length === 0) {
+            clearFallbackData();
+          }
+          return next;
+        });
+        notifyAppDataRefresh({ source: 'projects' });
+        setProjectToDelete(null);
+      } else {
+        setDeleteError(res.error || 'Failed to delete project.');
+      }
+    } catch {
+      recordDeletedProjectCode(projectToDelete.code);
+      clearFallbackData(projectToDelete.code);
+      setProjects((prev) => {
+        const next = prev.filter((p) => p.code !== projectToDelete.code);
+        if (next.length === 0) {
+          clearFallbackData();
+        }
+        return next;
+      });
+      notifyAppDataRefresh({ source: 'projects' });
+      setProjectToDelete(null);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -145,12 +200,90 @@ export default function Projects() {
               </div>
             </div>
 
-            <Link href={`/?project_id=${encodeURIComponent(p.code)}`} className="w-full py-2 bg-surface-container-low hover:bg-surface-container-high border border-surface-border rounded-lg text-[13px] font-bold text-on-surface flex items-center justify-center gap-2 transition-colors">
-              Open Dashboard <ArrowRight size={16} />
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link href={`/?project_id=${encodeURIComponent(p.code)}`} className="flex-1 py-2 bg-surface-container-low hover:bg-surface-container-high border border-surface-border rounded-lg text-[13px] font-bold text-on-surface flex items-center justify-center gap-2 transition-colors">
+                Open Dashboard <ArrowRight size={16} />
+              </Link>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteError(null);
+                  setProjectToDelete({ code: p.code, name: p.name });
+                }}
+                title={`Delete ${p.name}`}
+                aria-label={`Delete ${p.name}`}
+                className="p-2 border border-surface-border hover:border-status-conflict/40 hover:bg-status-conflict/10 text-on-surface-variant hover:text-status-conflict rounded-lg transition-colors cursor-pointer shrink-0"
+              >
+                <Trash2 size={16} />
+              </button>
+            </div>
           </div>
         ))}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {projectToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-surface-container-lowest border border-surface-border rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-surface-border pb-3">
+              <div className="flex items-center gap-2 font-bold text-[16px] text-status-conflict">
+                <AlertTriangle size={18} />
+                <span>Delete Project</span>
+              </div>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => {
+                  setProjectToDelete(null);
+                  setDeleteError(null);
+                }}
+                className="p-1 text-on-surface-variant hover:text-on-surface rounded-lg hover:bg-surface-container cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-2 text-[13px] text-on-surface">
+              <p>
+                Are you sure you want to delete <span className="font-semibold text-on-surface">{projectToDelete.name}</span> (<code className="text-primary font-mono">{projectToDelete.code}</code>)?
+              </p>
+              <p className="text-on-surface-variant text-[12px]">
+                This will permanently remove the project and its associated schedule activities, daily reports, review queue items, and audit records. This action cannot be undone.
+              </p>
+            </div>
+
+            {deleteError && (
+              <div className="p-2.5 rounded-lg text-[12px] flex items-center gap-2 bg-status-conflict/10 text-status-conflict border border-status-conflict/20">
+                <X size={15} />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-surface-border">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => {
+                  setProjectToDelete(null);
+                  setDeleteError(null);
+                }}
+                className="px-4 py-2 bg-surface-container hover:bg-surface-container-high text-on-surface font-semibold rounded-lg transition-colors cursor-pointer text-[13px]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleDeleteProject}
+                className="px-4 py-2 bg-status-conflict hover:bg-status-conflict/90 text-white font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer text-[13px] shadow-xs disabled:opacity-50"
+              >
+                {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                <span>{isDeleting ? 'Deleting...' : 'Delete Project'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* New Project Modal */}
       {isModalOpen && (

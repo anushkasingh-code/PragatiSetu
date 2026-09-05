@@ -3,6 +3,7 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from backend.app.db.models.activity import ScheduleActivity
 from backend.app.services.ai.vector_store import get_activity_collection
+from backend.app.services.normalizer_service import normalize_project_id
 
 logger = logging.getLogger("pragatisetu.vector_indexer")
 
@@ -49,7 +50,8 @@ def index_schedule_activities(
     """
     query = db.query(ScheduleActivity)
     if project_id:
-        query = query.filter(ScheduleActivity.project_id == project_id)
+        norm_pid = normalize_project_id(project_id)
+        query = query.filter(ScheduleActivity.project_id == norm_pid)
 
     activities: List[ScheduleActivity] = query.all()
     if not activities:

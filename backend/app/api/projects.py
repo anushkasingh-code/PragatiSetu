@@ -9,6 +9,12 @@ from backend.app.db.database import get_db
 from backend.app.db.models.project import Project
 from backend.app.db.models.wbs import WBSNode
 from backend.app.db.models.activity import ScheduleActivity
+from backend.app.db.models.audit import AuditRecord
+from backend.app.db.models.transcription import Transcription
+from backend.app.db.models.report import SourceReport
+from backend.app.db.models.event import ExtractedEvent
+from backend.app.db.models.decision import MatchDecision
+from backend.app.db.models.candidate import MatchCandidate
 from backend.app.schemas.project import ProjectCreate, ProjectResponse
 from backend.app.schemas.wbs import WBSNodeResponse, WBSTreeNode
 from backend.app.schemas.activity import ActivityResponse
@@ -82,6 +88,37 @@ def get_project_by_id(project_id: str, db: Session = Depends(get_db)):
             detail=f"Project with ID '{project_id}' not found."
         )
     return project
+
+@router.delete("/projects/{project_id}", status_code=status.HTTP_200_OK)
+def delete_project(project_id: str, db: Session = Depends(get_db)):
+    """Deletes a single project and its associated project-specific data."""
+    project = db.query(Project).filter(Project.project_id == project_id).first()
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project with ID '{project_id}' not found."
+        )
+
+    # Clean up project-specific audit records and transcriptions
+    db.query(AuditRecord).filter(AuditRecord.project_id == project_id).delete(synchronize_session=False)
+    db.query(Transcription).filter(Transcription.project_id == project_id).delete(synchronize_session=False)
+
+    # Clean up match decisions and candidates for events belonging to this project's reports
+    report_ids = [r.report_id for r in db.query(SourceReport.report_id).filter(SourceReport.project_id == project_id).all()]
+    if report_ids:
+        event_ids = [e.event_id for e in db.query(ExtractedEvent.event_id).filter(ExtractedEvent.report_id.in_(report_ids)).all()]
+        if event_ids:
+            db.query(MatchDecision).filter(MatchDecision.event_id.in_(event_ids)).delete(synchronize_session=False)
+            db.query(MatchCandidate).filter(MatchCandidate.event_id.in_(event_ids)).delete(synchronize_session=False)
+            db.query(ExtractedEvent).filter(ExtractedEvent.event_id.in_(event_ids)).delete(synchronize_session=False)
+        db.query(SourceReport).filter(SourceReport.project_id == project_id).delete(synchronize_session=False)
+
+    db.query(ScheduleActivity).filter(ScheduleActivity.project_id == project_id).delete(synchronize_session=False)
+    db.query(WBSNode).filter(WBSNode.project_id == project_id).delete(synchronize_session=False)
+
+    db.delete(project)
+    db.commit()
+    return {"message": f"Project '{project_id}' deleted successfully.", "project_id": project_id}
 
 @router.post("/projects/{project_id}/schedule/upload", status_code=status.HTTP_200_OK)
 async def upload_baseline_schedule(project_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):

@@ -38,7 +38,7 @@ def submit_human_review_decision(event_id: str, payload: HumanReviewRequest, db:
 @router.get("/reviews/pending", status_code=status.HTTP_200_OK)
 def get_pending_reviews(
     project_id: str = "PROJ-ALPHA",
-    limit: int = 100,
+    limit: int = 1000,
     db: Session = Depends(get_db)
 ):
     """
@@ -52,16 +52,17 @@ def get_pending_reviews(
     from backend.app.db.models.candidate import MatchCandidate
     from backend.app.db.models.activity import ScheduleActivity
     from backend.app.services.decision_service import DecisionService
+    from backend.app.services.normalizer_service import normalize_project_id
+    from backend.app.services.candidate_generator_service import CandidateGeneratorService
+    from sqlalchemy import or_
 
-    target_project = project_id or "PROJ-ALPHA"
-    if target_project in ("PRAGATI-01", "24P201"):
-        target_project = "PROJ-ALPHA"
+    target_project = normalize_project_id(project_id)
 
     pending_decisions = {"HUMAN_REVIEW", "UNPLANNED_REVIEW", "CONFLICT_REVIEW"}
 
     reports = (
         db.query(SourceReport)
-        .filter(SourceReport.project_id == target_project)
+        .filter(or_(SourceReport.project_id == project_id, SourceReport.project_id == target_project))
         .order_by(SourceReport.created_at.desc())
         .all()
     )
@@ -95,6 +96,16 @@ def get_pending_reviews(
                 .limit(5)
                 .all()
             )
+
+            # Auto-regenerate if candidates are missing or empty due to stale unnormalized state
+            if not cands:
+                try:
+                    gen_srv = CandidateGeneratorService(db)
+                    _, cands, _ = gen_srv.generate_candidates_for_event(evt.event_id)
+                    dec_srv = DecisionService(db)
+                    _, dec = dec_srv.make_decision_for_event(evt.event_id)
+                except Exception:
+                    pass
 
             cand_list = []
             item_acts = {}

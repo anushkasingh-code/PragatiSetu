@@ -15,14 +15,11 @@ from backend.app.services.validation import (
     ValidationError
 )
 from backend.app.services.ai.vector_indexer import index_schedule_activities
+from backend.app.services.normalizer_service import normalize_project_id
 
 def _normalize_project_id(pid: str) -> str:
-    cleaned = str(pid).strip()
-    if cleaned.upper() in ("ALPHA-001", "ALPHA", "PROJECT-ALPHA", "PROJ_ALPHA"):
-        return "PROJ-ALPHA"
-    if cleaned.upper() in ("BETA-001", "BETA", "PROJECT-BETA", "PROJ_BETA"):
-        return "PROJ-BETA"
-    return cleaned
+    return normalize_project_id(pid)
+
 
 class BaselineImporter:
     def __init__(self, db_session: Session):

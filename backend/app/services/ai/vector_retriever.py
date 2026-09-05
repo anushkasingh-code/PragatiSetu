@@ -2,6 +2,7 @@ import logging
 from typing import List, Optional, Any
 from backend.app.schemas.ai import VectorSearchResult
 from backend.app.services.ai.vector_store import get_activity_collection
+from backend.app.services.normalizer_service import normalize_project_id
 
 logger = logging.getLogger("pragatisetu.vector_retriever")
 
@@ -13,11 +14,13 @@ def search_schedule_activities(
 ) -> List[VectorSearchResult]:
     """
     Executes semantic vector search for activities matching query within the designated project.
-    Strict project boundary: ChromaDB metadata filter `where={'project_id': project_id}` ensures
+    Strict project boundary: ChromaDB metadata filter `where={'project_id': norm_project_id}` ensures
     queries for PragatiSetu will never retrieve Project Beta activities.
     """
     if not query or not query.strip() or not project_id:
         return []
+
+    norm_project_id = normalize_project_id(project_id)
 
     collection = get_activity_collection(client=client)
 
@@ -31,7 +34,7 @@ def search_schedule_activities(
         results = collection.query(
             query_texts=[query.strip()],
             n_results=safe_top_k,
-            where={"project_id": project_id}
+            where={"project_id": norm_project_id}
         )
     except Exception as e:
         logger.warning(f"Vector search query failed: {e}")

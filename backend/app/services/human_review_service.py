@@ -64,8 +64,9 @@ def process_human_review_decision(
         }
 
     else:  # REJECT or UNPLANNED
-        decision.decision = "UNPLANNED_REVIEW"
-        existing_reasons = decision.reasons or []
+        decision.decision = "UNPLANNED" if norm_decision == "UNPLANNED" else "REJECT"
+        decision.top_activity_id = None
+        existing_reasons = list(decision.reasons or [])
         existing_reasons.append(reviewer_note)
         decision.reasons = existing_reasons
         db.commit()
@@ -73,7 +74,7 @@ def process_human_review_decision(
         return {
             "event_id": event_id,
             "decision": norm_decision,
-            "selected_activity_id": selected_activity_id or decision.top_activity_id,
+            "selected_activity_id": None,
             "applied": False,
             "status": None,
             "percent_complete": None,
