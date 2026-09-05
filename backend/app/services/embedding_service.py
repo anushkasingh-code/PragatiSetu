@@ -12,10 +12,10 @@ def get_embedding_model():
 
     try:
         from sentence_transformers import SentenceTransformer  # type: ignore
-        # Load small 22MB sentence-transformer model on CPU
-        _MODEL_INSTANCE = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+        # Try local cache only to prevent blocking network DNS/timeout delays
+        _MODEL_INSTANCE = SentenceTransformer("all-MiniLM-L6-v2", device="cpu", local_files_only=True)
     except Exception as e:
-        print(f"[EmbeddingService] SentenceTransformer model load notice: {e}. Using fallback TF-IDF similarity.")
+        # Fall back to offline deterministic embeddings without network hangs
         _MODEL_INSTANCE = None
 
     _MODEL_LOADED = True

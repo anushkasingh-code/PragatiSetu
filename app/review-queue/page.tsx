@@ -19,6 +19,8 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Edit3,
+  RotateCcw,
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
@@ -103,66 +105,30 @@ function fallbackToReviewItem(record: FallbackReviewRecord): ReviewItem {
 }
 
 async function fetchPendingReviews(projectId: string): Promise<ReviewItem[]> {
-  const fallbackItems = getPendingFallbackReviews().map(fallbackToReviewItem);
-  const items: ReviewItem[] = [...fallbackItems];
-
-  const reportsResult = await apiFetchSafe<{ report_id: string }[]>(`/projects/${projectId}/reports`);
-  if (!reportsResult.ok) return items;
-
-  for (const report of reportsResult.data) {
-    const eventsResult = await apiFetchSafe<ExtractedEvent[]>(`/reports/${report.report_id}/events`);
-    if (!eventsResult.ok) continue;
-    const events = eventsResult.data;
-
-    for (const event of events) {
-      let decision: MatchDecision | null = null;
-      const decisionResult = await apiFetchSafe<MatchDecision>(`/events/${event.event_id}/decision`);
-      if (decisionResult.ok) {
-        decision = decisionResult.data;
-      } else {
-        const matchResult = await apiFetchSafe<MatchDecision>(`/events/${event.event_id}/match`, {
-          method: 'POST',
-        });
-        if (matchResult.ok) decision = matchResult.data;
-      }
-
-      if (!decision || !PENDING_DECISIONS.has(decision.decision)) continue;
-
-      let candidates: CandidateScore[] = [];
-      const candGet = await apiFetchSafe<{ candidates: CandidateScore[] }>(`/events/${event.event_id}/candidates`);
-      if (candGet.ok) {
-        candidates = candGet.data.candidates ?? [];
-      } else {
-        const candPost = await apiFetchSafe<{ candidates: CandidateScore[] }>(
-          `/events/${event.event_id}/candidates`,
-          { method: 'POST' },
-        );
-        if (candPost.ok) candidates = candPost.data.candidates ?? [];
-      }
-
-      const activities: Record<string, Activity> = {};
-      for (const candidate of candidates.slice(0, 5)) {
-        if (activities[candidate.activity_id]) continue;
-        const actResult = await apiFetchSafe<Activity>(`/activities/${candidate.activity_id}`);
-        if (actResult.ok) activities[candidate.activity_id] = actResult.data;
-      }
-
-      items.push({ event, decision, candidates, activities });
-    }
+  // 1. Fetch live pending reviews from fast aggregated backend endpoint
+  const pendingRes = await apiFetchSafe<ReviewItem[]>(`/projects/${projectId}/reviews/pending`);
+  if (pendingRes.ok && Array.isArray(pendingRes.data) && pendingRes.data.length > 0) {
+    return pendingRes.data;
   }
 
-  return items;
+  // 2. Fallback to session items if backend returned empty
+  const fallbackItems = getPendingFallbackReviews().map(fallbackToReviewItem);
+  return fallbackItems;
 }
 
 export default function ReviewQueue() {
   const searchParams = useSearchParams();
-  const projectId = searchParams.get('project_id') ?? 'PROJ-ALPHA';
+  const rawProjectId = searchParams.get('project_id') ?? 'PROJ-ALPHA';
+  const projectId = rawProjectId === 'PRAGATI-01' || rawProjectId === '24P201' ? 'PROJ-ALPHA' : rawProjectId;
 
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const [isModifying, setIsModifying] = useState(false);
+  const [customWbsCode, setCustomWbsCode] = useState('');
+  const [modifyNote, setModifyNote] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const loadQueue = useCallback(async () => {
@@ -196,13 +162,23 @@ export default function ReviewQueue() {
 
   useEffect(() => {
     setSelectedActivityId(null);
+    setIsModifying(false);
+    setCustomWbsCode('');
+    setModifyNote('');
   }, [currentIndex, currentItem?.event.event_id]);
 
-  const handleDecision = async (decision: 'ACCEPT' | 'REJECT') => {
+  const handleDecision = async (
+    decision: 'ACCEPT' | 'REJECT',
+    overrideActivityId?: string,
+    overrideReason?: string
+  ) => {
     if (!currentItem) return;
     setActionLoading(true);
     setError(null);
     try {
+      const chosenActivityId = overrideActivityId || activeActivityId;
+      const chosenReason = overrideReason || (decision === 'ACCEPT' ? 'Planner confirmed match' : 'Planner rejected match');
+
       if (currentItem.isFallback) {
         resolveFallbackReview(currentItem.event.event_id);
         notifyAppDataRefresh({ source: 'review-queue' });
@@ -215,8 +191,8 @@ export default function ReviewQueue() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           decision,
-          selected_activity_id: decision === 'ACCEPT' ? activeActivityId : undefined,
-          reason: decision === 'ACCEPT' ? 'Planner confirmed match' : 'Planner rejected match',
+          selected_activity_id: decision === 'ACCEPT' ? chosenActivityId : undefined,
+          reason: chosenReason,
         }),
       });
 
@@ -224,11 +200,13 @@ export default function ReviewQueue() {
         setError(`Review action failed: ${result.error}`);
         return;
       }
+      notifyAppDataRefresh({ source: 'review-queue' });
       await loadQueue();
     } catch {
       setError('Failed to submit review decision.');
     } finally {
       setActionLoading(false);
+      setIsModifying(false);
     }
   };
 
@@ -236,12 +214,34 @@ export default function ReviewQueue() {
     setSelectedActivityId(activityId);
   };
 
+  const handleResetQueue = async () => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      await apiFetchSafe('/reviews/reset', { method: 'POST' });
+      notifyAppDataRefresh({ source: 'review-queue' });
+      await loadQueue();
+    } catch {
+      setError('Failed to reset review items.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   return (
     <div className="p-6 h-[calc(100vh-4rem)] flex flex-col gap-6 max-w-[1600px] mx-auto w-full">
       <div className="flex justify-between items-end shrink-0">
         <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-primary bg-primary/10 px-2.5 py-0.5 rounded border border-primary/20">
+              PragatiSetu Validation
+            </span>
+            <span className="text-[11px] font-mono text-on-surface-variant bg-surface-container-low px-2 py-0.5 rounded border border-surface-border font-semibold">
+              Project Alpha (24P201)
+            </span>
+          </div>
           <h2 className="text-[24px] font-semibold text-on-surface">Review Queue</h2>
-          <p className="text-[14px] text-on-surface-variant mt-1">Resolve AI-extracted field events against the WBS.</p>
+          <p className="text-[14px] text-on-surface-variant mt-0.5">Resolve AI-extracted field events against the WBS.</p>
         </div>
         <div className="flex items-center gap-3">
           <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-surface-container-high text-on-surface text-[11px] font-semibold border border-surface-border uppercase tracking-wider">
@@ -250,9 +250,17 @@ export default function ReviewQueue() {
           </span>
           <button
             onClick={() => void loadQueue()}
-            className="px-4 py-1.5 border border-surface-border rounded-lg text-[12px] font-bold hover:bg-surface-container transition-colors flex items-center gap-2 bg-surface-container-lowest"
+            className="px-3 py-1.5 border border-surface-border rounded-lg text-[12px] font-bold hover:bg-surface-container transition-colors flex items-center gap-1.5 bg-surface-container-lowest text-on-surface cursor-pointer"
           >
-            <Filter size={16} /> Refresh
+            <Filter size={14} /> Refresh
+          </button>
+          <button
+            onClick={handleResetQueue}
+            disabled={actionLoading}
+            title="Reset test events back to review queue"
+            className="px-3 py-1.5 border border-surface-border rounded-lg text-[12px] font-bold hover:bg-surface-container transition-colors flex items-center gap-1.5 bg-surface-container-lowest text-on-surface-variant cursor-pointer disabled:opacity-50"
+          >
+            <RotateCcw size={14} /> Reset Queue
           </button>
         </div>
       </div>
@@ -264,8 +272,23 @@ export default function ReviewQueue() {
       {loading ? (
         <div className="flex-1 flex items-center justify-center text-on-surface-variant">Loading review queue...</div>
       ) : !currentItem ? (
-        <div className="flex-1 flex items-center justify-center text-on-surface-variant">
-          No items pending human review.
+        <div className="flex-1 flex flex-col items-center justify-center text-on-surface-variant gap-4 bg-surface-container-lowest border border-surface-border rounded-xl p-8 max-w-md mx-auto my-auto text-center animate-fadeIn">
+          <div className="w-12 h-12 rounded-full bg-status-completed/10 text-status-completed flex items-center justify-center">
+            <CheckCircle2 size={28} />
+          </div>
+          <div>
+            <h3 className="text-[18px] font-semibold text-on-surface mb-1">All Reviews Completed!</h3>
+            <p className="text-[13px] text-on-surface-variant leading-relaxed">
+              All field events have been processed and applied to the WBS baseline schedule.
+            </p>
+          </div>
+          <button
+            onClick={handleResetQueue}
+            disabled={actionLoading}
+            className="mt-2 px-5 py-2.5 bg-primary text-on-primary rounded-lg text-[13px] font-bold hover:bg-primary/90 transition-colors flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
+          >
+            <RotateCcw size={16} /> Reset Demo Items for Testing
+          </button>
         </div>
       ) : (
         <div className="flex-1 grid grid-cols-1 xl:grid-cols-12 gap-6 min-h-0">
@@ -392,14 +415,78 @@ export default function ReviewQueue() {
                           <button
                             onClick={() => void handleDecision('ACCEPT')}
                             disabled={actionLoading || !activeActivityId}
-                            className="flex-1 bg-primary hover:bg-primary-container text-on-primary py-2.5 rounded-lg text-[14px] font-bold transition-colors flex justify-center items-center gap-2 disabled:opacity-70"
+                            className="flex-1 bg-primary hover:bg-primary-container text-on-primary py-2.5 rounded-lg text-[14px] font-bold transition-colors flex justify-center items-center gap-2 disabled:opacity-70 cursor-pointer"
                           >
                             <Check size={18} /> ACCEPT MATCH
                           </button>
-                          <button className="px-6 py-2.5 bg-surface-container-low hover:bg-surface-container-high border border-surface-border text-on-surface rounded-lg text-[14px] font-bold transition-colors">
-                            MODIFY
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextState = !isModifying;
+                              setIsModifying(nextState);
+                              if (nextState && !customWbsCode && activeActivityId) {
+                                setCustomWbsCode(activeActivityId);
+                              }
+                            }}
+                            className={`px-6 py-2.5 border rounded-lg text-[14px] font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                              isModifying
+                                ? 'bg-primary/10 border-primary text-primary'
+                                : 'bg-surface-container-low hover:bg-surface-container-high border-surface-border text-on-surface'
+                            }`}
+                          >
+                            <Edit3 size={16} /> MODIFY
                           </button>
                         </div>
+
+                        {/* Expandable Manual Modification Card */}
+                        {isModifying && (
+                          <div className="mt-4 p-4 rounded-xl border border-primary/30 bg-primary/5 space-y-3 animate-fadeIn">
+                            <div className="flex justify-between items-center">
+                              <span className="text-[12px] font-bold uppercase tracking-wider text-primary">Manual Match Override</span>
+                              <button
+                                type="button"
+                                onClick={() => setIsModifying(false)}
+                                className="text-on-surface-variant hover:text-on-surface text-[12px] cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                            <div>
+                              <label className="text-[11px] font-bold uppercase text-on-surface-variant block mb-1">
+                                Target WBS Activity Code
+                              </label>
+                              <input
+                                type="text"
+                                value={customWbsCode}
+                                onChange={(e) => setCustomWbsCode(e.target.value)}
+                                placeholder="e.g. 24P201 or CIV-101"
+                                className="w-full bg-surface-container-lowest border border-surface-border rounded-lg px-3 py-1.5 text-[13px] font-mono font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[11px] font-bold uppercase text-on-surface-variant block mb-1">
+                                Supervisor Override Reason
+                              </label>
+                              <input
+                                type="text"
+                                value={modifyNote}
+                                onChange={(e) => setModifyNote(e.target.value)}
+                                placeholder="e.g. Activity re-assigned based on site visual inspection"
+                                className="w-full bg-surface-container-lowest border border-surface-border rounded-lg px-3 py-1.5 text-[13px] text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
+                              />
+                            </div>
+                            <div className="flex justify-end gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => void handleDecision('ACCEPT', customWbsCode, modifyNote || 'Manual WBS override by supervisor')}
+                                disabled={actionLoading || !customWbsCode.trim()}
+                                className="px-4 py-2 bg-primary text-on-primary text-[12px] font-bold rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 cursor-pointer"
+                              >
+                                Save &amp; Confirm Match
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   }

@@ -9,6 +9,7 @@ class ProjectDashboardResponse(BaseModel):
     in_progress_activities: int
     started_activities: int
     not_started_activities: int
+    progress_percentage: float = 0.0
     total_reports: int
     total_events: int
     auto_linked_events: int

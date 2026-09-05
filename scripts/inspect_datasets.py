@@ -27,7 +27,7 @@ lines = []
 lines.append("# PragatiSetu — Ground Truth Dataset Schema Documentation\n")
 lines.append("> **IMPORTANT NOTICE**: This dataset is entirely **SYNTHETIC** development/evaluation ground truth. It is NOT real Oil India Limited data.\n")
 lines.append("## Dataset Overview\n")
-lines.append("- **Project Alpha**: 75 baseline schedule activities, 400 labelled field events (280 dev, 60 val, 60 test).")
+lines.append("- **PragatiSetu**: 75 baseline schedule activities, 400 labelled field events (280 dev, 60 val, 60 test).")
 lines.append("- **Project Beta**: 30 baseline schedule activities, 100 field report events.")
 lines.append("- **QA Checks**: 45 checks reported as PASS in `10_dataset_quality_report.md`.\n")
 lines.append("---\n")

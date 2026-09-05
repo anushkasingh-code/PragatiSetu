@@ -14,7 +14,7 @@ def search_schedule_activities(
     """
     Executes semantic vector search for activities matching query within the designated project.
     Strict project boundary: ChromaDB metadata filter `where={'project_id': project_id}` ensures
-    queries for Project Alpha will never retrieve Project Beta activities.
+    queries for PragatiSetu will never retrieve Project Beta activities.
     """
     if not query or not query.strip() or not project_id:
         return []

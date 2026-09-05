@@ -28,9 +28,9 @@ def main():
         print(f"Activities Imported: {stats['activities_imported']}")
         
         if stats['activities_imported'] == 75:
-            print("\n[VERIFIED] Project Alpha imported activity count matches expected ground truth: 75 activities!")
+            print("\n[VERIFIED] PragatiSetu imported activity count matches expected ground truth: 75 activities!")
         else:
-            print(f"\n[WARNING] Project Alpha activity count ({stats['activities_imported']}) differs from expected 75!")
+            print(f"\n[WARNING] PragatiSetu activity count ({stats['activities_imported']}) differs from expected 75!")
 
     except Exception as e:
         print(f"\n[ERROR] Baseline import failed: {e}")

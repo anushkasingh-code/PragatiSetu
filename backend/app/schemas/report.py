@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict
+from backend.app.schemas.common import UtcDatetime
 
 class ValidationErrorItem(BaseModel):
     code: str
@@ -34,6 +35,6 @@ class ReportResponse(BaseModel):
     file_size: int
     processing_status: str
     rejection_reason: Optional[str] = None
-    created_at: datetime
+    created_at: UtcDatetime
 
     model_config = ConfigDict(from_attributes=True)

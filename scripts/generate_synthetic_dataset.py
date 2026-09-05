@@ -8,11 +8,11 @@ os.makedirs(DATASET_DIR, exist_ok=True)
 print(f"Generating synthetic dataset files in {DATASET_DIR}...")
 
 # -------------------------------------------------------------
-# 1. 01_baseline_schedule.xlsx (Project Alpha - 75 activities)
+# 1. 01_baseline_schedule.xlsx (PragatiSetu - 75 activities)
 # -------------------------------------------------------------
 wbs_nodes = [
     # Level 1
-    ("WBS-ALPHA-1.0", "Project Alpha Root", 1, None),
+    ("WBS-ALPHA-1.0", "PragatiSetu Root", 1, None),
     ("WBS-ALPHA-1.1", "Site Preparation & Civil Works", 2, "WBS-ALPHA-1.0"),
     ("WBS-ALPHA-1.2", "Piping & Fabrication", 2, "WBS-ALPHA-1.0"),
     ("WBS-ALPHA-1.3", "Equipment Erection & Mechanical", 2, "WBS-ALPHA-1.0"),
@@ -69,8 +69,8 @@ df_alpha_wbs = pd.DataFrame([
 ])
 df_alpha_project = pd.DataFrame([{
     "project_id": "PROJ-ALPHA",
-    "name": "Project Alpha Refinery Expansion",
-    "description": "Synthetic baseline schedule for Project Alpha (75 activities)",
+    "name": "PragatiSetu Refinery Expansion",
+    "description": "Synthetic baseline schedule for PragatiSetu (75 activities)",
     "created_at": "2026-01-01T00:00:00"
 }])
 
@@ -281,7 +281,7 @@ qa_report_content = """# Dataset Quality & QA Validation Report
 - **Overall QA Status**: PASS
 
 ## Project Breakdown
-### Project Alpha
+### PragatiSetu
 - **Baseline Activities**: 75
 - **Labelled Field Events**: 400
   - **Development Split**: 280 events

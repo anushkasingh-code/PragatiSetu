@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict
+from backend.app.schemas.common import UtcDatetime
 
 class MatchDecisionResponse(BaseModel):
     decision_id: str
@@ -14,7 +15,7 @@ class MatchDecisionResponse(BaseModel):
     missing_evidence: Optional[List[str]] = None
     matcher_version: str = "v1"
     scoring_policy_version: str = "v1"
-    created_at: datetime
+    created_at: UtcDatetime
 
     model_config = ConfigDict(from_attributes=True)
 

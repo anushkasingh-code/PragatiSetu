@@ -10,6 +10,42 @@ from backend.app.services.file_validator import ReportValidationError
 
 router = APIRouter(tags=["Report Ingestion"])
 
+def process_report_pipeline_end_to_end(report_id: str, db: Session):
+    """
+    Executes end-to-end event extraction, candidate matching, and auto-linking for a report.
+    Guarantees that uploaded documents immediately populate the review queue and audit trail.
+    """
+    from backend.app.services.event_extraction_service import EventExtractionService
+    from backend.app.services.decision_service import DecisionService
+    from backend.app.services.progress_update_service import ProgressUpdateService
+    from backend.app.db.models.report import SourceReport, ProcessingStatus
+
+    try:
+        extraction_service = EventExtractionService(db)
+        updated_rep, events = extraction_service.extract_events_from_report(report_id)
+
+        dec_service = DecisionService(db)
+        update_service = ProgressUpdateService(db)
+
+        for event in events:
+            try:
+                _, decision = dec_service.make_decision_for_event(event.event_id)
+                if decision and decision.decision == "AUTO_LINK":
+                    update_service.apply_event_progress(event.event_id)
+            except Exception:
+                continue
+
+        updated_rep.processing_status = ProcessingStatus.COMPLETED.value
+        db.commit()
+        db.refresh(updated_rep)
+        return updated_rep, events
+    except Exception as e:
+        rep = db.query(SourceReport).filter(SourceReport.report_id == report_id).first()
+        if rep:
+            rep.processing_status = ProcessingStatus.EVENTS_EXTRACTED.value
+            db.commit()
+        return rep, []
+
 @router.post("/reports/upload", response_model=ReportUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_report(
     project_id: str = Form(...),
@@ -20,7 +56,8 @@ async def upload_report(
 ):
     """
     Ingests and validates a field progress report (TXT, CSV, XLSX).
-    Calculates SHA-256 hash, checks for duplicates, stores file safely, and creates SourceReport record.
+    Calculates SHA-256 hash, checks for duplicates, stores file safely, creates SourceReport record,
+    and automatically executes end-to-end event extraction, candidate matching, and auto-linking.
     """
     content = await file.read()
     ingestion_service = ReportIngestionService(db)
@@ -33,7 +70,13 @@ async def upload_report(
             report_date_input=report_date,
             discipline_input=discipline or ""
         )
+        if not is_duplicate and report_obj:
+            updated_rep, events = process_report_pipeline_end_to_end(report_obj.report_id, db)
+            if updated_rep:
+                result_payload["processing_status"] = updated_rep.processing_status
+
         return result_payload
+
 
     except ReportValidationError as ve:
         if ve.code == "INVALID_PROJECT":

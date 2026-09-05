@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from backend.app.db.models.project import Project
 from backend.app.db.models.activity import ScheduleActivity
 from backend.app.db.models.report import SourceReport
@@ -17,6 +18,13 @@ def get_project_dashboard_summary(project_id: str, db: Session) -> dict:
     in_progress_activities = activities.filter(ScheduleActivity.status == "IN_PROGRESS").count()
     started_activities = activities.filter(ScheduleActivity.status == "STARTED").count()
     not_started_activities = activities.filter(ScheduleActivity.status == "NOT_STARTED").count()
+
+    # Calculate real weighted average progress across all activities
+    if total_activities > 0:
+        avg_pct = db.query(func.avg(ScheduleActivity.percent_complete)).filter(ScheduleActivity.project_id == project_id).scalar() or 0.0
+        progress_percentage = round(float(avg_pct), 1)
+    else:
+        progress_percentage = 0.0
 
     reports = db.query(SourceReport).filter(SourceReport.project_id == project_id)
     total_reports = reports.count()
@@ -42,6 +50,7 @@ def get_project_dashboard_summary(project_id: str, db: Session) -> dict:
         "in_progress_activities": in_progress_activities,
         "started_activities": started_activities,
         "not_started_activities": not_started_activities,
+        "progress_percentage": progress_percentage,
         "total_reports": total_reports,
         "total_events": total_events,
         "auto_linked_events": auto_linked_events,

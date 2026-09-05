@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, ConfigDict
+from backend.app.schemas.common import UtcDatetime
 
 class ApplyProgressResponse(BaseModel):
     event_id: str
@@ -19,7 +20,7 @@ class ApplyProgressResponse(BaseModel):
 
 class AuditRecordResponse(BaseModel):
     audit_id: str
-    timestamp: datetime
+    timestamp: UtcDatetime
     project_id: str
     activity_id: str
     event_id: str

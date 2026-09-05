@@ -7,11 +7,17 @@ from backend.app.schemas.ai import (
     VectorIndexRequest,
     VectorIndexResponse,
     ExplainRequest,
-    ExplainResponse
+    ExplainResponse,
+    ChatRequest,
+    ChatResponse,
+    KeyConfigRequest,
+    KeyConfigResponse,
+    KeyStatusResponse
 )
 from backend.app.services.ai.vector_indexer import index_schedule_activities
 from backend.app.services.ai.vector_retriever import search_schedule_activities
 from backend.app.services.ai.groq_service import GroqExplanationService
+from backend.app.services.ai.chat_service import PragatiSetuChatService
 
 router = APIRouter(prefix="/ai", tags=["AI Enhancement (Vector Search & Groq LLM)"])
 
@@ -90,3 +96,68 @@ def explain_query_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"AI explanation failed: {str(e)}"
         )
+
+@router.post("/chat", response_model=ChatResponse, status_code=status.HTTP_200_OK)
+def chat_endpoint(
+    payload: ChatRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Conversational AI Copilot for PragatiSetu.
+    Grounded in live database state and Chroma vector schedule embeddings.
+    Seamlessly utilizes Groq LLM if GROQ_API_KEY is configured, or local dynamic RAG engine if not.
+    """
+    try:
+        service = PragatiSetuChatService()
+        return service.generate_chat_reply(payload=payload, db=db)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Chat processing failed: {str(e)}"
+        )
+
+@router.get("/key-status", response_model=KeyStatusResponse, status_code=status.HTTP_200_OK)
+def get_key_status_endpoint():
+    """
+    Checks whether Groq API key is currently active or configured.
+    """
+    try:
+        from backend.app.services.ai.chat_service import get_groq_key_status
+        status_data = get_groq_key_status()
+        return KeyStatusResponse(**status_data)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to check key status: {str(e)}"
+        )
+
+@router.post("/configure-key", response_model=KeyConfigResponse, status_code=status.HTTP_200_OK)
+def configure_key_endpoint(payload: KeyConfigRequest):
+    """
+    Saves and activates the Groq API key dynamically without requiring a manual server restart.
+    Persists to .env files and immediately configures os.environ and application settings.
+    """
+    try:
+        from backend.app.services.ai.chat_service import save_groq_api_key
+        cleaned = payload.groq_api_key.strip()
+        if not cleaned:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="API key cannot be empty."
+            )
+        save_groq_api_key(cleaned)
+        return KeyConfigResponse(
+            status="SUCCESS",
+            message="Groq API key configured and activated successfully.",
+            configured=True,
+            source="groq"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to configure key: {str(e)}"
+        )
+
+

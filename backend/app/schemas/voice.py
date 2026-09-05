@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Optional, List, Any
 from pydantic import BaseModel, ConfigDict, Field
 from backend.app.schemas.event import ExtractedEventResponse
+from backend.app.schemas.common import UtcDatetime
 
 class TranscriptionResponse(BaseModel):
     transcription_id: str
@@ -13,7 +14,7 @@ class TranscriptionResponse(BaseModel):
     processing_time_ms: Optional[int] = 0
     status: str
     error_message: Optional[str] = None
-    created_at: datetime
+    created_at: UtcDatetime
 
     model_config = ConfigDict(from_attributes=True)
 

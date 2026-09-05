@@ -159,6 +159,19 @@ def process_transcription_to_events(
     extraction_service = EventExtractionService(db)
     updated_rep, events = extraction_service.extract_events_from_report(str(report_id))
 
+    from backend.app.services.decision_service import DecisionService
+    from backend.app.services.progress_update_service import ProgressUpdateService
+    dec_service = DecisionService(db)
+    update_service = ProgressUpdateService(db)
+
+    for evt in events:
+        try:
+            _, dec = dec_service.make_decision_for_event(evt.event_id)
+            if dec and dec.decision == "AUTO_LINK":
+                update_service.apply_event_progress(evt.event_id)
+        except Exception:
+            pass
+
     event_responses = [ExtractedEventResponse.model_validate(evt) for evt in events]
 
     return {

@@ -6,8 +6,8 @@
 
 ## File Inventory
 
-1. `01_baseline_schedule.xlsx` — Project Alpha baseline schedule (75 activities).
-2. `02_field_report_events.xlsx` — 400 labelled Project Alpha field-report events.
+1. `01_baseline_schedule.xlsx` — PragatiSetu baseline schedule (75 activities).
+2. `02_field_report_events.xlsx` — 400 labelled PragatiSetu field-report events.
 3. `03_daily_progress_reports.xlsx` — grouped DPR-style reports.
 4. `04_discipline_progress_reports.xlsx` — structured Civil/Piping/Electrical progress sheets.
 5. `05_activity_terminology_dictionary.xlsx` — terminology/alias dictionary.
@@ -20,14 +20,14 @@
 
 ## Counts
 
-- Project Alpha activities: **75**
-- Project Alpha events: **400**
+- PragatiSetu activities: **75**
+- PragatiSetu events: **400**
 - Project Beta activities: **30**
 - Project Beta events: **100**
-- Project Alpha DPRs: **63**
+- PragatiSetu DPRs: **63**
 - Structured discipline rows: **120**
 
-## Project Alpha Event Distribution
+## PragatiSetu Event Distribution
 
 - PARAPHRASE: 90
 - CLEAN: 80

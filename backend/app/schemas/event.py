@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, ConfigDict
+from backend.app.schemas.common import UtcDatetime
 
 class ExtractedEventResponse(BaseModel):
     event_id: str
@@ -20,7 +21,7 @@ class ExtractedEventResponse(BaseModel):
     source_position: Optional[Dict[str, Any]] = None
     extraction_method: str = "RULE_BASED"
     extraction_version: str = "v1"
-    created_at: datetime
+    created_at: UtcDatetime
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -1,214 +1,598 @@
-import { Search, Calendar, Filter, Download, History, ArrowRight, RotateCw, PersonStanding, BrainCircuit } from 'lucide-react';
+'use client';
+
+import React, { useState, useEffect, useCallback } from 'react';
+import { apiFetchSafe } from '@/lib/api';
+import { useAppDataRefresh } from '@/lib/app-sync';
+import { parseServerDate } from '@/lib/date';
+import {
+  Search,
+  Calendar,
+  Filter,
+  Download,
+  History,
+  Trash2,
+  PersonStanding,
+  RotateCw,
+  Check,
+  X,
+  FileCheck,
+  CheckCircle2,
+} from 'lucide-react';
+
+interface AuditRecord {
+  id: string;
+  type: 'AUTO_LINK' | 'OVERRIDE' | 'VERIFIED';
+  time: string;
+  daysAgo: number;
+  description: string;
+  confidence: number;
+  user: string;
+  hash: string;
+  activityCode: string;
+  activityName: string;
+  wbs: string;
+  prevStatus: string;
+  prevPercent: number;
+  prevStart: string;
+  newStatus: string;
+  newPercent: number;
+  newStart: string;
+}
+
+const INITIAL_AUDIT_DATA: AuditRecord[] = [
+  {
+    id: 'aud-001',
+    type: 'AUTO_LINK',
+    time: '09:42 AM',
+    daysAgo: 1,
+    description: 'System automatically linked field voice DPR transcript to schedule activity.',
+    confidence: 94,
+    user: 'System (AI)',
+    hash: 'a7f9b2c4',
+    activityCode: '24P201',
+    activityName: 'Pour Foundation Slab',
+    wbs: 'L6-CIV-04',
+    prevStatus: 'NOT_STARTED',
+    prevPercent: 0,
+    prevStart: '--/--/----',
+    newStatus: 'IN_PROGRESS',
+    newPercent: 45,
+    newStart: '05/09/2026',
+  },
+  {
+    id: 'aud-002',
+    type: 'OVERRIDE',
+    time: '11:15 AM',
+    daysAgo: 2,
+    description: 'Site Supervisor Ramesh Sharma adjusted progress percentage after rebar QA sign-off.',
+    confidence: 88,
+    user: 'Ramesh Sharma (Supervisor)',
+    hash: 'e8d1c93a',
+    activityCode: '24P202',
+    activityName: 'Install Pump Manifold Flanges',
+    wbs: 'L6-PIP-02',
+    prevStatus: 'IN_PROGRESS',
+    prevPercent: 60,
+    prevStart: '01/09/2026',
+    newStatus: 'COMPLETED',
+    newPercent: 100,
+    newStart: '01/09/2026',
+  },
+  {
+    id: 'aud-003',
+    type: 'VERIFIED',
+    time: '03:30 PM',
+    daysAgo: 4,
+    description: 'Human planner J. Miller confirmed activity linking from contractor PDF report.',
+    confidence: 76,
+    user: 'J. Miller (Planner)',
+    hash: '3b4fa910',
+    activityCode: '24P205',
+    activityName: 'Hydrostatic Pipeline Pressure Test',
+    wbs: 'L6-QA-01',
+    prevStatus: 'NOT_STARTED',
+    prevPercent: 0,
+    prevStart: '--/--/----',
+    newStatus: 'IN_PROGRESS',
+    newPercent: 85,
+    newStart: '03/09/2026',
+  },
+  {
+    id: 'aud-004',
+    type: 'AUTO_LINK',
+    time: '08:15 AM',
+    daysAgo: 5,
+    description: 'Automated match from site sensor telemetry on compressor installation.',
+    confidence: 96,
+    user: 'System (AI)',
+    hash: '9f23c7b1',
+    activityCode: '24P210',
+    activityName: 'Compressor Skid Alignment',
+    wbs: 'L6-MEC-08',
+    prevStatus: 'IN_PROGRESS',
+    prevPercent: 30,
+    prevStart: '28/08/2026',
+    newStatus: 'IN_PROGRESS',
+    newPercent: 70,
+    newStart: '28/08/2026',
+  },
+  {
+    id: 'aud-005',
+    type: 'OVERRIDE',
+    time: '04:45 PM',
+    daysAgo: 6,
+    description: 'Field Engineer Priya Patel corrected WBS mapping for cable tray installation.',
+    confidence: 91,
+    user: 'Priya Patel (Engineer)',
+    hash: '7c89a022',
+    activityCode: '24P214',
+    activityName: 'Cable Tray Conduit Pulling',
+    wbs: 'L6-ELE-03',
+    prevStatus: 'NOT_STARTED',
+    prevPercent: 0,
+    prevStart: '--/--/----',
+    newStatus: 'IN_PROGRESS',
+    newPercent: 50,
+    newStart: '30/08/2026',
+  },
+];
 
 export default function AuditTrail() {
+  const [search, setSearch] = useState('');
+  const [dateFilter, setDateFilter] = useState<'7d' | '30d' | 'all'>('7d');
+  const [decisionFilter, setDecisionFilter] = useState<'all' | 'AUTO_LINK' | 'OVERRIDE' | 'VERIFIED'>('all');
+  const [visibleCount, setVisibleCount] = useState(5);
+  const [isDateOpen, setIsDateOpen] = useState(false);
+  const [isDecisionOpen, setIsDecisionOpen] = useState(false);
+  const [exportNotice, setExportNotice] = useState(false);
+  const [clearNotice, setClearNotice] = useState(false);
+  const [liveAuditData, setLiveAuditData] = useState<AuditRecord[]>(INITIAL_AUDIT_DATA);
+
+  const fetchAuditTrail = useCallback(async () => {
+    // 1. Fetch live audit records from backend
+    const auditRes = await apiFetchSafe<any[]>('/audit');
+    if (!auditRes.ok || !Array.isArray(auditRes.data)) return;
+
+    // 2. Fetch activities metadata for descriptions & WBS codes
+    const actRes = await apiFetchSafe<any[]>('/projects/PROJ-ALPHA/activities');
+    const actMap = new Map<string, { desc: string; wbs: string }>();
+    if (actRes.ok && Array.isArray(actRes.data)) {
+      actRes.data.forEach((a) => {
+        actMap.set(a.activity_id, {
+          desc: a.description || a.activity_id,
+          wbs: a.wbs_id || a.discipline || 'Civil & Earthworks',
+        });
+      });
+    }
+
+    const now = new Date().getTime();
+    const liveMapped: AuditRecord[] = auditRes.data.map((rec) => {
+      const recDate = parseServerDate(rec.timestamp);
+      const diffDays = Math.max(0, Math.floor((now - recDate.getTime()) / (1000 * 60 * 60 * 24)));
+      const timeStr = recDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      let decisionType: 'AUTO_LINK' | 'OVERRIDE' | 'VERIFIED' = 'AUTO_LINK';
+      if (rec.system_decision === 'OVERRIDE') decisionType = 'OVERRIDE';
+      else if (rec.system_decision === 'HUMAN_REVIEW' || (rec.reviewer && !rec.reviewer.includes('SYSTEM'))) {
+        decisionType = 'VERIFIED';
+      }
+
+      const actInfo = actMap.get(rec.activity_id);
+
+      return {
+        id: rec.audit_id,
+        type: decisionType,
+        time: `${recDate.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${timeStr}`,
+        daysAgo: diffDays,
+        description: rec.reason || `Progress update applied for activity ${rec.activity_id}.`,
+        confidence: Math.round(rec.confidence || 90),
+        user: rec.reviewer && rec.reviewer.includes('SYSTEM') ? 'System (AI Auto-Link)' : 'Site Planner (Human Review)',
+        hash: rec.report_id ? rec.report_id.slice(-8) : rec.audit_id.slice(-8),
+        activityCode: rec.activity_id,
+        activityName: actInfo?.desc || `Activity ${rec.activity_id}`,
+        wbs: actInfo?.wbs || 'Civil & Earthworks',
+        prevStatus: rec.previous_value?.status || 'NOT_STARTED',
+        prevPercent: Math.round(rec.previous_value?.percent_complete || 0),
+        prevStart: rec.previous_value?.actual_start || '--/--/----',
+        newStatus: rec.new_value?.status || 'IN_PROGRESS',
+        newPercent: Math.round(rec.new_value?.percent_complete || 0),
+        newStart: rec.new_value?.actual_start || recDate.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' }),
+      };
+    });
+
+    const isCleared = typeof window !== 'undefined' && localStorage.getItem('pragatisetu:audit-cleared') === 'true';
+    if (isCleared && liveMapped.length === 0) {
+      setLiveAuditData([]);
+      return;
+    }
+    if (liveMapped.length > 0 && typeof window !== 'undefined') {
+      localStorage.removeItem('pragatisetu:audit-cleared');
+    }
+
+    // Merge live records in front of INITIAL_AUDIT_DATA (avoiding duplicates)
+    const liveIds = new Set(liveMapped.map((r) => r.id));
+    const merged = [...liveMapped, ...INITIAL_AUDIT_DATA.filter((r) => !liveIds.has(r.id))];
+    setLiveAuditData(merged);
+  }, []);
+
+  useEffect(() => {
+    void fetchAuditTrail();
+  }, [fetchAuditTrail]);
+
+  useAppDataRefresh(fetchAuditTrail);
+
+  // Filter records
+  const filtered = liveAuditData.filter((r) => {
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      const match =
+        r.activityCode.toLowerCase().includes(q) ||
+        r.activityName.toLowerCase().includes(q) ||
+        r.wbs.toLowerCase().includes(q) ||
+        r.user.toLowerCase().includes(q);
+      if (!match) return false;
+    }
+    if (dateFilter === '7d' && r.daysAgo > 7) return false;
+    if (dateFilter === '30d' && r.daysAgo > 30) return false;
+    if (decisionFilter !== 'all' && r.type !== decisionFilter) return false;
+    return true;
+  });
+
+  const displayedRecords = filtered.slice(0, visibleCount);
+
+  const handleExport = () => {
+    const headers = ['Audit ID', 'Decision Type', 'Time', 'Activity Code', 'Activity Name', 'WBS', 'User', 'Confidence', 'Previous Status', 'Previous %', 'New Status', 'New %', 'Hash'];
+    const rows = filtered.map((r) => [
+      r.id,
+      r.type,
+      r.time,
+      r.activityCode,
+      `"${r.activityName}"`,
+      r.wbs,
+      `"${r.user}"`,
+      `${r.confidence}%`,
+      r.prevStatus,
+      `${r.prevPercent}%`,
+      r.newStatus,
+      `${r.newPercent}%`,
+      r.hash,
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `pragatisetu-audit-trail-${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    setExportNotice(true);
+    setTimeout(() => setExportNotice(false), 3000);
+  };
+
+  const handleClearAuditTrail = async () => {
+    if (!confirm('Clear all audit trail records to start a fresh workspace?')) return;
+    try {
+      await apiFetchSafe('/audit/clear', { method: 'POST' });
+      setLiveAuditData([]);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('pragatisetu:audit-cleared', 'true');
+      }
+      notifyAppDataRefresh({ source: 'audit-trail' });
+      setClearNotice(true);
+      setTimeout(() => setClearNotice(false), 3500);
+    } catch {
+      setLiveAuditData([]);
+    }
+  };
+
+  const handleRestoreDemoRecords = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('pragatisetu:audit-cleared');
+    }
+    setLiveAuditData(INITIAL_AUDIT_DATA);
+  };
+
   return (
-    <div className="p-6 max-w-5xl mx-auto w-full">
-      
-      {/* Header & Filters */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+    <div className="p-6 max-w-5xl mx-auto w-full space-y-6">
+      {/* Header & Controls */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 className="text-[32px] font-bold text-on-surface leading-tight">Audit & Compliance Trail</h2>
-          <p className="text-[14px] text-on-surface-variant mt-1">Immutable ledger of schedule modifications and system actions.</p>
-        </div>
-        
-        <div className="flex flex-wrap items-center gap-3 bg-surface-container-lowest p-2 rounded-xl border border-surface-border shadow-sm">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" size={16} />
-            <input 
-              type="text" 
-              placeholder="Activity ID..." 
-              className="pl-9 pr-4 py-1.5 rounded-lg border-none bg-surface-container-low text-on-surface focus:ring-2 focus:ring-primary text-[14px] w-40"
-            />
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-primary bg-primary/10 px-2.5 py-0.5 rounded border border-primary/20">
+              PragatiSetu Compliance
+            </span>
+            <span className="text-[11px] font-mono text-on-surface-variant bg-surface-container-low px-2 py-0.5 rounded border border-surface-border font-semibold">
+              Project Alpha (24P201)
+            </span>
           </div>
-          <div className="h-6 w-px bg-surface-border"></div>
-          <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-surface-container-low transition-colors font-mono text-[13px] text-on-surface-variant">
-            <Calendar size={16} /> Last 7 Days
+          <h2 className="text-[28px] font-bold text-on-surface leading-tight">Audit &amp; Compliance Trail</h2>
+          <p className="text-[14px] text-on-surface-variant mt-0.5">
+            Immutable ledger of schedule modifications, AI linkages, and supervisor overrides.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 bg-surface-container-lowest p-2 rounded-xl border border-surface-border shadow-sm">
+          {/* Search Box */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" size={15} />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Filter Activity ID..."
+              className="pl-8 pr-3 py-1.5 rounded-lg bg-surface-container-low text-on-surface focus:outline-none focus:ring-2 focus:ring-primary text-[13px] w-40"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-outline hover:text-on-surface cursor-pointer"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
+          <div className="h-5 w-px bg-surface-border"></div>
+
+          {/* Date Filter Dropdown */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setIsDateOpen(!isDateOpen);
+                setIsDecisionOpen(false);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-surface-container-low transition-colors font-mono text-[12px] text-on-surface-variant font-medium cursor-pointer"
+            >
+              <Calendar size={14} />
+              <span>{dateFilter === '7d' ? 'Last 7 Days' : dateFilter === '30d' ? 'Last 30 Days' : 'All Dates'}</span>
+            </button>
+            {isDateOpen && (
+              <div className="absolute left-0 mt-2 w-36 bg-surface-container-lowest border border-surface-border rounded-xl shadow-lg z-30 p-1 space-y-0.5 animate-fadeIn">
+                {[
+                  { id: '7d', label: 'Last 7 Days' },
+                  { id: '30d', label: 'Last 30 Days' },
+                  { id: 'all', label: 'All Dates' },
+                ].map((d) => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => {
+                      setDateFilter(d.id as typeof dateFilter);
+                      setIsDateOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-[12px] flex items-center justify-between cursor-pointer ${
+                      dateFilter === d.id ? 'bg-primary/10 text-primary font-bold' : 'hover:bg-surface-container-low text-on-surface'
+                    }`}
+                  >
+                    <span>{d.label}</span>
+                    {dateFilter === d.id && <Check size={13} className="text-primary" />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Decision Type Dropdown */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setIsDecisionOpen(!isDecisionOpen);
+                setIsDateOpen(false);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-surface-container-low transition-colors font-mono text-[12px] text-on-surface-variant font-medium cursor-pointer"
+            >
+              <Filter size={14} />
+              <span>{decisionFilter === 'all' ? 'All Decisions' : decisionFilter}</span>
+            </button>
+            {isDecisionOpen && (
+              <div className="absolute left-0 mt-2 w-44 bg-surface-container-lowest border border-surface-border rounded-xl shadow-lg z-30 p-1 space-y-0.5 animate-fadeIn">
+                {[
+                  { id: 'all', label: 'All Decisions' },
+                  { id: 'AUTO_LINK', label: 'AUTO_LINK' },
+                  { id: 'OVERRIDE', label: 'OVERRIDE' },
+                  { id: 'VERIFIED', label: 'VERIFIED' },
+                ].map((dec) => (
+                  <button
+                    key={dec.id}
+                    type="button"
+                    onClick={() => {
+                      setDecisionFilter(dec.id as typeof decisionFilter);
+                      setIsDecisionOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-[12px] flex items-center justify-between cursor-pointer ${
+                      decisionFilter === dec.id ? 'bg-primary/10 text-primary font-bold' : 'hover:bg-surface-container-low text-on-surface'
+                    }`}
+                  >
+                    <span>{dec.label}</span>
+                    {decisionFilter === dec.id && <Check size={13} className="text-primary" />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Export Button */}
+          <button
+            type="button"
+            onClick={handleExport}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-surface-border bg-surface-container-low hover:bg-surface-container-high transition-colors font-mono text-[12px] text-on-surface font-semibold cursor-pointer"
+            title="Export CSV audit trail"
+          >
+            <Download size={14} /> Export CSV
           </button>
-          <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-surface-container-low transition-colors font-mono text-[13px] text-on-surface-variant">
-            <Filter size={16} /> All Decisions
-          </button>
-          <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-surface-border bg-surface-container-low hover:bg-surface-container-high transition-colors font-mono text-[13px] text-on-surface">
-            <Download size={16} /> Export
+
+          {/* Clear Audit Trail Button */}
+          <button
+            type="button"
+            onClick={handleClearAuditTrail}
+            disabled={liveAuditData.length === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-surface-border bg-surface-container-low hover:bg-red-500/10 hover:text-red-600 hover:border-red-500/30 transition-colors font-mono text-[12px] text-on-surface-variant font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Clear audit trail records for a fresh workspace"
+          >
+            <Trash2 size={14} /> Clear History
           </button>
         </div>
       </div>
 
-      <div className="flex flex-col gap-6">
-        
-        {/* Audit Card 1: AUTO_LINK */}
-        <div className="bg-surface-container-lowest rounded-xl border border-surface-border shadow-sm overflow-hidden flex flex-col md:flex-row">
-          
-          {/* Metadata */}
-          <div className="w-full md:w-64 bg-surface-container-low p-5 border-b md:border-b-0 md:border-r border-surface-border flex flex-col justify-between shrink-0">
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[11px] font-semibold tracking-wider uppercase text-primary bg-primary-fixed/30 border border-primary/20 px-2 py-0.5 rounded-sm">AUTO_LINK</span>
-                <span className="font-mono text-[13px] text-on-surface-variant">09:42 AM</span>
-              </div>
-              <p className="text-[14px] text-on-surface mt-2 leading-relaxed">System automatically matched voice transcript to schedule activity.</p>
-            </div>
-            <div className="mt-6 pt-4 border-t border-surface-border space-y-1.5">
-              <div className="flex justify-between items-center">
-                <span className="text-[12px] font-bold text-on-surface-variant">Confidence</span>
-                <span className="font-mono text-[13px] text-status-completed font-semibold">94%</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-[12px] font-bold text-on-surface-variant">User</span>
-                <span className="font-mono text-[13px] text-on-surface">System (AI)</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-[12px] font-bold text-on-surface-variant">Hash</span>
-                <span className="font-mono text-[13px] text-outline">a7f9b2c4</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 p-6">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded bg-surface-container-highest flex items-center justify-center">
-                <History className="text-on-surface-variant" size={20} />
-              </div>
-              <div>
-                <h3 className="text-[18px] font-semibold text-on-surface">24P201 - Pour Foundation Slab</h3>
-                <p className="font-mono text-[13px] text-on-surface-variant">WBS: L6-CIV-04</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* BEFORE */}
-              <div className="border border-surface-border rounded-lg bg-audit-previous p-4">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant mb-4 flex items-center gap-1.5">
-                  <History size={14} /> PREVIOUS STATE
-                </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-[14px] text-on-surface-variant">Status</span>
-                    <span className="font-mono text-[13px] text-on-surface">NOT_STARTED</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[14px] text-on-surface-variant">% Complete</span>
-                    <span className="font-mono text-[13px] text-on-surface">0%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[14px] text-on-surface-variant">Actual Start</span>
-                    <span className="font-mono text-[13px] text-on-surface/50">--/--/----</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* AFTER */}
-              <div className="border border-status-completed/20 rounded-lg bg-audit-new p-4 relative">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-status-completed mb-4 flex items-center gap-1.5">
-                  <RotateCw size={14} /> NEW STATE
-                </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-[14px] text-on-surface-variant">Status</span>
-                    <span className="font-mono text-[13px] text-status-completed font-bold">IN_PROGRESS</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[14px] text-on-surface-variant">% Complete</span>
-                    <span className="font-mono text-[13px] text-status-completed font-bold">25%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[14px] text-on-surface-variant">Actual Start</span>
-                    <span className="font-mono text-[13px] text-on-surface">10/24/2023</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-5 p-4 bg-surface-container-low rounded-lg border border-surface-border border-dashed">
-              <p className="text-[12px] font-bold text-on-surface-variant mb-1.5">Source Transcript Snippet:</p>
-              <p className="font-mono text-[13px] text-on-surface italic">"Yeah we started pouringquot;Yeah we started pouring the foundation on sector four today. About a quarter of the way done.way done."quot;</p>
-            </div>
-          </div>
+      {/* Export Confirmation Toast */}
+      {exportNotice && (
+        <div className="p-3 bg-status-completed/10 border border-status-completed/20 rounded-xl text-[13px] font-medium text-on-surface flex items-center gap-2 animate-fadeIn">
+          <CheckCircle2 size={16} className="text-status-completed" />
+          <span>Audit trail exported successfully as CSV!</span>
         </div>
+      )}
 
-        {/* Audit Card 2: HUMAN_REVIEW */}
-        <div className="bg-surface-container-lowest rounded-xl border border-surface-border shadow-sm overflow-hidden flex flex-col md:flex-row">
-          
-          {/* Metadata */}
-          <div className="w-full md:w-64 bg-surface-container-low p-5 border-b md:border-b-0 md:border-r border-surface-border flex flex-col justify-between shrink-0">
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[11px] font-semibold tracking-wider uppercase text-secondary bg-secondary/10 border border-secondary/20 px-2 py-0.5 rounded-sm">HUMAN_REVIEW</span>
-                <span className="font-mono text-[13px] text-on-surface-variant">Yesterday</span>
-              </div>
-              <p className="text-[14px] text-on-surface mt-2 leading-relaxed">Planner manually corrected AI suggestion before committing.</p>
-            </div>
-            <div className="mt-6 pt-4 border-t border-surface-border space-y-1.5">
-              <div className="flex justify-between items-center">
-                <span className="text-[12px] font-bold text-on-surface-variant">Original Conf.</span>
-                <span className="font-mono text-[13px] text-status-review font-semibold">68%</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-[12px] font-bold text-on-surface-variant">User</span>
-                <span className="font-mono text-[13px] text-on-surface">J. Doe (Planner)</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-[12px] font-bold text-on-surface-variant">Hash</span>
-                <span className="font-mono text-[13px] text-outline">c92m1x8z</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 p-6">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded bg-surface-container-highest flex items-center justify-center">
-                <RotateCw className="text-on-surface-variant" size={20} />
-              </div>
-              <div>
-                <h3 className="text-[18px] font-semibold text-on-surface">18E105 - Install Main Switchgear</h3>
-                <p className="font-mono text-[13px] text-on-surface-variant">WBS: L5-ELEC-01</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              {/* PREVIOUS */}
-              <div className="border border-surface-border rounded-lg bg-audit-previous p-4">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant mb-4 flex items-center gap-1.5">
-                  <History size={14} /> PREVIOUS
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[14px] text-on-surface-variant">% Complete</span>
-                  <span className="font-mono text-[13px] text-on-surface">50%</span>
-                </div>
-              </div>
-
-              {/* AI SUGGESTION */}
-              <div className="border border-status-review/30 rounded-lg bg-surface-container-low p-4 opacity-70">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-status-review mb-4 flex items-center gap-1.5">
-                  <BrainCircuit size={14} /> AI SUGGESTION
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[14px] text-on-surface-variant">% Complete</span>
-                  <span className="font-mono text-[13px] text-status-review line-through">100%</span>
-                </div>
-              </div>
-
-              {/* HUMAN FINAL */}
-              <div className="border border-surface-border rounded-lg bg-audit-new p-4 shadow-sm relative">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-status-completed mb-4 flex items-center gap-1.5">
-                  <PersonStanding size={14} /> HUMAN FINAL
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[14px] text-on-surface-variant">% Complete</span>
-                  <span className="font-mono text-[13px] text-status-completed font-bold">85%</span>
-                </div>
-              </div>
-            </div>
-          </div>
+      {/* Clear Confirmation Toast */}
+      {clearNotice && (
+        <div className="p-3 bg-status-completed/10 border border-status-completed/20 rounded-xl text-[13px] font-medium text-on-surface flex items-center gap-2 animate-fadeIn">
+          <CheckCircle2 size={16} className="text-status-completed" />
+          <span>Audit trail cleared. Your workspace is fresh and ready for new work.</span>
         </div>
-        
-        <div className="text-center mt-4">
-          <button className="text-[12px] font-bold text-primary border border-primary/20 hover:bg-primary/5 transition-colors py-2.5 px-8 rounded-lg">
-            Load More History...
-          </button>
-        </div>
+      )}
 
+      {/* Audit Log Cards */}
+      <div className="flex flex-col gap-5">
+        {displayedRecords.length > 0 ? (
+          displayedRecords.map((r) => (
+            <div key={r.id} className="bg-surface-container-lowest rounded-xl border border-surface-border shadow-sm overflow-hidden flex flex-col md:flex-row">
+              {/* Metadata Column */}
+              <div className="w-full md:w-64 bg-surface-container-low p-5 border-b md:border-b-0 md:border-r border-surface-border flex flex-col justify-between shrink-0">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <span
+                      className={`text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded ${
+                        r.type === 'AUTO_LINK'
+                          ? 'text-primary bg-primary/10 border border-primary/20'
+                          : r.type === 'OVERRIDE'
+                          ? 'text-status-conflict bg-status-conflict/10 border border-status-conflict/20'
+                          : 'text-status-completed bg-status-completed/10 border border-status-completed/20'
+                      }`}
+                    >
+                      {r.type}
+                    </span>
+                    <span className="font-mono text-[12px] text-on-surface-variant font-medium">{r.time}</span>
+                  </div>
+                  <p className="text-[13px] text-on-surface mt-2 leading-relaxed">{r.description}</p>
+                </div>
+                <div className="mt-5 pt-3 border-t border-surface-border space-y-1.5 text-[12px]">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-on-surface-variant">Confidence</span>
+                    <span className="font-mono text-status-completed font-bold">{r.confidence}%</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-on-surface-variant">User</span>
+                    <span className="font-mono text-on-surface truncate max-w-[140px]" title={r.user}>{r.user}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-on-surface-variant">Hash</span>
+                    <span className="font-mono text-outline">{r.hash}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* State Transition Diff Column */}
+              <div className="flex-1 p-6">
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="w-9 h-9 rounded-lg bg-surface-container-high flex items-center justify-center text-primary">
+                    <History size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-[16px] font-bold text-on-surface">
+                      {r.activityCode} - {r.activityName}
+                    </h3>
+                    <p className="font-mono text-[12px] text-on-surface-variant">WBS: {r.wbs}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Previous State */}
+                  <div className="border border-surface-border rounded-lg bg-surface-container-low p-4">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-3 flex items-center gap-1.5">
+                      <History size={13} /> PREVIOUS STATE
+                    </div>
+                    <div className="space-y-1.5 text-[13px]">
+                      <div className="flex justify-between">
+                        <span className="text-on-surface-variant">Status</span>
+                        <span className="font-mono text-on-surface font-semibold">{r.prevStatus}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-on-surface-variant">% Complete</span>
+                        <span className="font-mono text-on-surface font-semibold">{r.prevPercent}%</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-on-surface-variant">Actual Start</span>
+                        <span className="font-mono text-on-surface/60">{r.prevStart}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* New State */}
+                  <div className="border border-status-completed/30 rounded-lg bg-status-completed/5 p-4">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-status-completed mb-3 flex items-center gap-1.5">
+                      {r.type === 'AUTO_LINK' ? <FileCheck size={13} /> : <PersonStanding size={13} />}
+                      {r.type === 'AUTO_LINK' ? 'AI PROPOSED & LINKED' : 'HUMAN FINAL RECORD'}
+                    </div>
+                    <div className="space-y-1.5 text-[13px]">
+                      <div className="flex justify-between">
+                        <span className="text-on-surface-variant">Status</span>
+                        <span className="font-mono text-status-completed font-bold">{r.newStatus}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-on-surface-variant">% Complete</span>
+                        <span className="font-mono text-status-completed font-bold">{r.newPercent}%</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-on-surface-variant">Actual Start</span>
+                        <span className="font-mono text-status-completed font-bold">{r.newStart}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="p-10 text-center bg-surface-container-lowest border border-surface-border rounded-xl text-on-surface flex flex-col items-center justify-center max-w-md mx-auto space-y-3">
+            <div className="w-12 h-12 rounded-full bg-status-completed/10 text-status-completed flex items-center justify-center">
+              <CheckCircle2 size={24} />
+            </div>
+            <h4 className="text-[16px] font-semibold">Audit Trail is Clean</h4>
+            <p className="text-[13px] text-on-surface-variant leading-relaxed">
+              All previous audit records have been cleared. As you link activities, process DPRs, or review field updates, new immutable logs will appear here.
+            </p>
+            <button
+              type="button"
+              onClick={handleRestoreDemoRecords}
+              className="mt-2 px-3 py-1.5 border border-surface-border text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low text-[12px] font-medium rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <RotateCw size={13} /> Load Demo Audit Logs
+            </button>
+          </div>
+        )}
+
+        {/* Load More Button */}
+        {visibleCount < filtered.length ? (
+          <div className="text-center mt-2">
+            <button
+              type="button"
+              onClick={() => setVisibleCount((prev) => Math.min(filtered.length, prev + 3))}
+              className="text-[12px] font-bold text-primary border border-primary/30 hover:bg-primary/5 transition-colors py-2 px-6 rounded-lg cursor-pointer"
+            >
+              Load More History ({filtered.length - visibleCount} remaining)...
+            </button>
+          </div>
+        ) : (
+          filtered.length > 0 && (
+            <div className="text-center py-2 text-[12px] font-medium text-outline">
+              All compliance log records displayed.
+            </div>
+          )
+        )}
       </div>
     </div>
   );

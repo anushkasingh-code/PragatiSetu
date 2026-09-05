@@ -1,0 +1,6 @@
+dpr_id,project_id,date,discipline,location,equipment_or_line,activity_description,quantity,unit,percent_complete,supervisor,notes
+DPR-2026-0905-01,PROJ-ALPHA,2026-09-05,Civil,Pump Area,F12,Formwork removal and surface finishing for Foundation F12,1,foundation,100,Ramesh Sharma,QA cleared inspection and surface curing completed
+DPR-2026-0905-02,PROJ-ALPHA,2026-09-05,Civil,Utility Corridor,U1,Bedding preparation in utility trench U1,45,meter,80,Ramesh Sharma,Trench graded and sand bed compacted
+DPR-2026-0905-03,PROJ-ALPHA,2026-09-05,Piping,Utility Corridor,8-U-301,Fit-up and weld joints for Utility Line 8-U-301,4,joints,85,Suresh Patel,NDT radiography passed for all 4 welds
+DPR-2026-0905-04,PROJ-ALPHA,2026-09-05,Piping,Utility Corridor,8-U-301,Prepare Utility Line 8-U-301 for hydrotest,1,line,90,Suresh Patel,Test manifold and calibrated pressure gauges installed
+DPR-2026-0905-05,PROJ-ALPHA,2026-09-05,Electrical,Substation 1,TRAY-SUB1,Install cable tray conduits and grounding jumpers,65,meter,75,Amit Verma,Raceway alignment verified with electrical drawing E-402

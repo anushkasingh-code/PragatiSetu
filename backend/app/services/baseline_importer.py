@@ -78,6 +78,7 @@ class BaselineImporter:
                     self.db.add(proj)
                 else:
                     existing_proj.name = proj_name
+                    existing_proj.description = f"{proj_name} Baseline Project"
                 stats["projects_imported"] += 1
 
         self.db.flush()

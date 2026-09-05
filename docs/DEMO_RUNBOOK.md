@@ -16,7 +16,7 @@ pip install -r backend/requirements.txt
 # 2. Run Alembic database migrations
 python -m alembic -c backend/alembic.ini upgrade head
 
-# 3. Seed / Import Project Alpha Baseline Schedule (75 Activities)
+# 3. Seed / Import PragatiSetu Baseline Schedule (75 Activities)
 python scripts/import_baseline.py
 
 # 4. Launch FastAPI Application Server

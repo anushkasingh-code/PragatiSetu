@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 from backend.app.db.database import get_db
 from backend.app.db.models.audit import AuditRecord
@@ -34,3 +34,16 @@ def query_audit_trail(
 
     records = query.order_by(AuditRecord.timestamp.desc()).offset(offset).limit(limit).all()
     return records
+
+@router.post("/audit/clear", status_code=status.HTTP_200_OK)
+def clear_audit_trail(db: Session = Depends(get_db)):
+    """
+    Clears all audit records to allow a clean inspection workspace for the next batch of work.
+    """
+    deleted_count = db.query(AuditRecord).delete()
+    db.commit()
+    return {
+        "status": "cleared",
+        "message": "Audit trail cleared successfully.",
+        "deleted_count": deleted_count
+    }

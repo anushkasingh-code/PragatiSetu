@@ -4,6 +4,7 @@ import tempfile
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from backend.app.db.database import get_db
 from backend.app.db.models.project import Project
 from backend.app.db.models.wbs import WBSNode
@@ -17,9 +18,39 @@ router = APIRouter(tags=["Projects & Activities"])
 
 @router.get("/projects", response_model=List[ProjectResponse])
 def get_projects(db: Session = Depends(get_db)):
-    """Fetch all projects."""
+    """Fetch all projects with real computed progress and operational status."""
     projects = db.query(Project).all()
-    return projects
+    results = []
+    for p in projects:
+        acts = db.query(ScheduleActivity).filter(ScheduleActivity.project_id == p.project_id)
+        total = acts.count()
+        completed = acts.filter(ScheduleActivity.status == "COMPLETED").count()
+        in_progress = acts.filter(ScheduleActivity.status.in_(["IN_PROGRESS", "STARTED"])).count()
+
+        if total > 0:
+            avg_pct = db.query(func.avg(ScheduleActivity.percent_complete)).filter(ScheduleActivity.project_id == p.project_id).scalar() or 0.0
+            prog = round(float(avg_pct), 1)
+        else:
+            prog = 0.0
+
+        if total > 0 and completed == total:
+            status_val = "Completed"
+        elif in_progress > 0 or completed > 0 or p.project_id == "PROJ-ALPHA":
+            status_val = "Operational"
+        else:
+            status_val = "Planning"
+
+        results.append(ProjectResponse(
+            project_id=p.project_id,
+            name=p.name,
+            description=p.description,
+            created_at=p.created_at,
+            status=status_val,
+            progress_percentage=prog,
+            total_activities=total,
+            completed_activities=completed
+        ))
+    return results
 
 @router.post("/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 def create_project(payload: ProjectCreate, db: Session = Depends(get_db)):

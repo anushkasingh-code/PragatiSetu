@@ -58,7 +58,7 @@ def evaluate_project_decisions(project_id: str, baseline_file: str, events_file:
 
         for idx, row in df_events.iterrows():
             evt_id = f"EVT-DEC-EVAL-{project_id}-{idx:04d}"
-            mapped_act = str(row["mapped_activity_id"]).strip() if pd.notnull(row.get("mapped_activity_id")) else None
+            mapped_act = str(row.get("ground_truth_activity_id") or row.get("mapped_activity_id") or "").strip() or None
 
             db_evt = db.query(ExtractedEvent).filter(ExtractedEvent.event_id == evt_id).first()
             if not db_evt:
@@ -67,10 +67,10 @@ def evaluate_project_decisions(project_id: str, baseline_file: str, events_file:
                     report_id=report_id,
                     raw_text=str(row["raw_text"]),
                     event_date=pd.to_datetime(row["report_date"]).date() if pd.notnull(row.get("report_date")) else None,
-                    discipline=str(row["discipline"]) if pd.notnull(row.get("discipline")) else None,
-                    identifier=str(row["equipment_or_line_id"]) if pd.notnull(row.get("equipment_or_line_id")) else None,
-                    location=str(row["location"]) if pd.notnull(row.get("location")) else None,
-                    status=str(row["status"]) if pd.notnull(row.get("status")) else None,
+                    discipline=str(row.get("reported_discipline") or row.get("discipline") or "").strip() or None,
+                    identifier=str(row.get("ground_truth_identifier") or row.get("equipment_or_line_id") or "").strip() or None,
+                    location=str(row.get("ground_truth_location") or row.get("location") or "").strip() or None,
+                    status=str(row.get("ground_truth_status") or row.get("status") or "").strip() or None,
                     extraction_method="RULE_BASED",
                     extraction_version="v1"
                 )

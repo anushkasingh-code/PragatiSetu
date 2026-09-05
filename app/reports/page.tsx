@@ -1,6 +1,7 @@
 'use client';
 
 import { notifyAppDataRefresh } from '@/lib/app-sync';
+import { formatLocalDateTime, parseServerDate } from '@/lib/date';
 import { apiFetchSafe } from '@/lib/api';
 import {
   buildFallbackExtraction,
@@ -12,7 +13,21 @@ import {
   type FallbackReportRecord,
 } from '@/lib/report-fallback';
 import { looksLikeSiteReport, readFileAsText } from '@/lib/report-validation';
-import { UploadCloud, Mic, Sparkles, CheckCircle2, AlertTriangle, X } from 'lucide-react';
+import {
+  UploadCloud,
+  Mic,
+  MicOff,
+  CheckCircle2,
+  AlertTriangle,
+  X,
+  Square,
+  RotateCcw,
+  Volume2,
+  FileText,
+  Loader2,
+  Eye,
+  Trash2,
+} from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -73,12 +88,7 @@ function formatHistoryStatus(status: string) {
 }
 
 function formatHistoryDate(iso: string) {
-  return new Date(iso).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatLocalDateTime(iso);
 }
 
 function stepLabel(step: PipelineStep) {
@@ -110,17 +120,31 @@ function mergeHistory(apiReports: ReportResponse[], fallbackReports: FallbackRep
     ...fallbackReports.filter((r) => !apiIds.has(r.report_id)),
     ...apiReports,
   ];
-  return merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  return merged.sort((a, b) => parseServerDate(b.created_at).getTime() - parseServerDate(a.created_at).getTime());
 }
 
 export default function ReportsIngestionHub() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const projectId = searchParams.get('project_id') ?? 'PROJ-ALPHA';
+  const rawProjectId = searchParams.get('project_id') ?? 'PROJ-ALPHA';
+  const projectId = rawProjectId === 'PRAGATI-01' || rawProjectId === '24P201' ? 'PROJ-ALPHA' : rawProjectId;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pipelineCompleteRef = useRef(false);
+
+  // Live Voice Input States & Audio Refs
+  const [isRecording, setIsRecording] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [interimTranscript, setInterimTranscript] = useState('');
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [waveformBars, setWaveformBars] = useState<number[]>([20, 35, 50, 75, 90, 60, 80, 65, 45, 60, 35, 20]);
+  const [speechSupported, setSpeechSupported] = useState<boolean>(true);
+
+  const recognitionRef = useRef<any>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const animFrameRef = useRef<number | null>(null);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isProcessingVoice, setIsProcessingVoice] = useState(false);
@@ -132,6 +156,8 @@ export default function ReportsIngestionHub() {
   const [isPipelineActive, setIsPipelineActive] = useState(false);
   const [contentWarning, setContentWarning] = useState<string | null>(null);
   const [usedFallback, setUsedFallback] = useState(false);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [selectedReportDetail, setSelectedReportDetail] = useState<HistoryRow | null>(null);
 
   const updateStep = useCallback((id: string, patch: Partial<PipelineStep>) => {
     setPipelineSteps((prev) => prev.map((step) => (step.id === id ? { ...step, ...patch } : step)));
@@ -162,8 +188,23 @@ export default function ReportsIngestionHub() {
   }, [fetchHistory]);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const hasSpeech = !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+      setSpeechSupported(hasSpeech);
+    }
+
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch {}
+      }
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      }
+      if (audioContextRef.current) {
+        try { audioContextRef.current.close(); } catch {}
+      }
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
   }, []);
 
@@ -277,7 +318,10 @@ export default function ReportsIngestionHub() {
         await animateStep('match', 100);
       } else {
         for (let i = 0; i < events.length; i++) {
-          await apiFetchSafe(`/events/${events[i].event_id}/match`, { method: 'POST' });
+          const matchRes = await apiFetchSafe<{ decision?: string }>(`/events/${events[i].event_id}/match`, { method: 'POST' });
+          if (matchRes.ok && matchRes.data.decision === 'AUTO_LINK') {
+            await apiFetchSafe(`/events/${events[i].event_id}/apply`, { method: 'POST' });
+          }
           const progress = Math.max(10, Math.round(((i + 1) / events.length) * 100));
           updateStep('match', { status: 'in_progress', progress });
           await delay(200);
@@ -297,6 +341,41 @@ export default function ReportsIngestionHub() {
     [animateStep, updateStep, startStatusPolling, completePipeline],
   );
 
+  const handleClearFile = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setSelectedFile(null);
+    setUploadStatus('idle');
+    setReportId(null);
+    setContentWarning(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      setSelectedFile(files[0]);
+      setUploadStatus('idle');
+      setReportId(null);
+      setContentWarning(null);
+      setUsedFallback(false);
+    }
+  };
+
   const handleFileClick = () => {
     fileInputRef.current?.click();
   };
@@ -311,17 +390,15 @@ export default function ReportsIngestionHub() {
     }
   };
 
-  const handleUpload = async () => {
-    if (!selectedFile) return;
-
+  const uploadAndProcessFile = async (fileToUpload: File) => {
     setUploadStatus('uploading');
     setReportId(null);
     setContentWarning(null);
     setUsedFallback(false);
     pipelineCompleteRef.current = false;
 
-    const fileText = await readFileAsText(selectedFile);
-    const validation = looksLikeSiteReport(fileText, selectedFile.name);
+    const fileText = await readFileAsText(fileToUpload);
+    const validation = looksLikeSiteReport(fileText, fileToUpload.name);
     let forceFallback = !validation.isValid;
 
     if (!validation.isValid) {
@@ -332,7 +409,7 @@ export default function ReportsIngestionHub() {
     }
 
     setPipelineSteps([
-      { id: 'upload', label: 'Uploading', filename: selectedFile.name, status: 'in_progress', progress: 30 },
+      { id: 'upload', label: 'Uploading', filename: fileToUpload.name, status: 'in_progress', progress: 30 },
       { id: 'validate', label: 'Validating structure', status: 'waiting', progress: 0 },
       { id: 'extract', label: 'Extracting Events', status: 'waiting', progress: 0 },
       { id: 'match', label: 'Matching to WBS', status: 'waiting', progress: 0 },
@@ -346,7 +423,7 @@ export default function ReportsIngestionHub() {
       await animateStep('validate', 100);
       activeReportId = generateFallbackReportId();
       setReportId(activeReportId);
-      await runProcessingPipeline(activeReportId, selectedFile.name, true);
+      await runProcessingPipeline(activeReportId, fileToUpload.name, true);
       return;
     }
 
@@ -354,7 +431,7 @@ export default function ReportsIngestionHub() {
       method: 'POST',
       body: (() => {
         const formData = new FormData();
-        formData.append('file', selectedFile);
+        formData.append('file', fileToUpload);
         formData.append('project_id', projectId);
         formData.append('report_date', new Date().toISOString().slice(0, 10));
         return formData;
@@ -376,22 +453,207 @@ export default function ReportsIngestionHub() {
     }
 
     setReportId(activeReportId);
-    await runProcessingPipeline(activeReportId, selectedFile.name, forceFallback);
+    await runProcessingPipeline(activeReportId, fileToUpload.name, forceFallback);
   };
 
-  const handleProcessVoice = () => {
+  const handleUpload = () => {
+    if (selectedFile) {
+      void uploadAndProcessFile(selectedFile);
+    }
+  };
+
+  const startVoiceRecording = async () => {
+    setVoiceError(null);
+    setVoiceProcessed(false);
+    // Every recording session starts completely fresh
+    setVoiceTranscript('');
+    setInterimTranscript('');
+
+    const windowObj = typeof window !== 'undefined' ? (window as any) : null;
+    const SpeechRecognition = windowObj?.SpeechRecognition || windowObj?.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setVoiceError('Speech recognition is not supported in this browser. You can edit the text directly or load the sample update below.');
+    } else {
+      try {
+        const rec = new SpeechRecognition();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = 'en-IN';
+
+        let sessionAccumulated = '';
+
+        rec.onresult = (event: any) => {
+          let interim = '';
+          let final = '';
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            if (event.results[i].isFinal) {
+              final += event.results[i][0].transcript + ' ';
+            } else {
+              interim += event.results[i][0].transcript;
+            }
+          }
+          if (final) {
+            sessionAccumulated = (sessionAccumulated + ' ' + final).trim();
+            setVoiceTranscript(sessionAccumulated);
+          }
+          setInterimTranscript(interim);
+        };
+
+        rec.onerror = (event: any) => {
+          console.warn('Speech recognition notice:', event.error);
+          if (event.error === 'not-allowed') {
+            setVoiceError('Microphone permission was denied. Please allow microphone access in browser settings.');
+          } else if (event.error !== 'no-speech') {
+            setVoiceError(`Speech error: ${event.error}`);
+          }
+          stopVoiceRecording();
+        };
+
+        rec.onend = () => {
+          setIsRecording(false);
+          setInterimTranscript('');
+        };
+
+        recognitionRef.current = rec;
+        rec.start();
+        setIsRecording(true);
+      } catch (err: any) {
+        setVoiceError(`Could not start speech recognition: ${err?.message ?? 'error'}`);
+      }
+    }
+
+    // Connect real audio stream for visualizer if possible
+    try {
+      if (typeof navigator !== 'undefined' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaStreamRef.current = stream;
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          audioContextRef.current = ctx;
+          const source = ctx.createMediaStreamSource(stream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 64;
+          source.connect(analyser);
+          const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+          const updateVisualizer = () => {
+            analyser.getByteFrequencyData(dataArray);
+            const bars = Array.from(dataArray.slice(0, 12)).map((val) =>
+              Math.max(15, Math.min(100, Math.round((val / 255) * 100))),
+            );
+            setWaveformBars(bars);
+            animFrameRef.current = requestAnimationFrame(updateVisualizer);
+          };
+          animFrameRef.current = requestAnimationFrame(updateVisualizer);
+          return;
+        }
+      }
+    } catch {
+      // Audio context unavailable or mic permission rejected for visualizer
+    }
+
+    // Fallback dynamic wave bars while recording
+    const interval = setInterval(() => {
+      setWaveformBars(Array.from({ length: 12 }, () => Math.floor(25 + Math.random() * 65)));
+    }, 120);
+    animFrameRef.current = interval as any;
+  };
+
+  const stopVoiceRecording = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+      recognitionRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+    }
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close();
+      } catch {}
+      audioContextRef.current = null;
+    }
+    if (animFrameRef.current) {
+      if (typeof animFrameRef.current === 'number') {
+        cancelAnimationFrame(animFrameRef.current);
+        clearInterval(animFrameRef.current);
+      }
+      animFrameRef.current = null;
+    }
+    setIsRecording(false);
+    setInterimTranscript('');
+    setWaveformBars([20, 35, 50, 75, 90, 60, 80, 65, 45, 60, 35, 20]);
+  };
+
+  const handleResetVoice = () => {
+    stopVoiceRecording();
+    setVoiceTranscript('');
+    setInterimTranscript('');
+    setVoiceProcessed(false);
+    setVoiceError(null);
+  };
+
+  const handleLoadSampleVoice = () => {
+    setVoiceTranscript(
+      'Activity 24P201 foundation pour completed. Moving to curing phase. Next is steel erection on Monday.',
+    );
+    setVoiceProcessed(false);
+    setVoiceError(null);
+  };
+
+  const handleProcessVoice = async () => {
+    if (!voiceTranscript.trim()) {
+      setVoiceError('Please record or enter a spoken field update first.');
+      return;
+    }
+    stopVoiceRecording();
     setIsProcessingVoice(true);
-    setTimeout(() => {
-      setIsProcessingVoice(false);
+    setVoiceError(null);
+
+    try {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const seconds = String(now.getSeconds()).padStart(2, '0');
+      const filename = `voice_dpr_${year}${month}${day}_${hours}${minutes}${seconds}.txt`;
+      const voiceFile = new File([voiceTranscript.trim()], filename, { type: 'text/plain' });
+
+      await uploadAndProcessFile(voiceFile);
       setVoiceProcessed(true);
-    }, 1500);
+      // Clear transcript so next recording or typed update is completely fresh
+      setVoiceTranscript('');
+      setInterimTranscript('');
+      setTimeout(() => {
+        setVoiceProcessed(false);
+      }, 3500);
+    } catch {
+      setVoiceError('Failed to process spoken update into the schedule pipeline.');
+    } finally {
+      setIsProcessingVoice(false);
+    }
   };
 
   return (
     <div className="p-6 max-w-7xl mx-auto w-full">
       <div className="mb-8">
-        <h2 className="text-[24px] font-semibold text-on-surface mb-2">Report Ingestion Hub</h2>
-        <p className="text-[16px] text-on-surface-variant">Process field updates and operational reports via file or voice.</p>
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-primary bg-primary/10 px-2.5 py-0.5 rounded border border-primary/20">
+            PragatiSetu Ingestion
+          </span>
+          <span className="text-[11px] font-mono text-on-surface-variant bg-surface-container-low px-2 py-0.5 rounded border border-surface-border font-semibold">
+            Project Alpha (24P201)
+          </span>
+        </div>
+        <h2 className="text-[24px] font-semibold text-on-surface mb-1">Report Ingestion Hub</h2>
+        <p className="text-[14px] text-on-surface-variant">Process field updates and daily progress reports via file upload or hands-free voice.</p>
       </div>
 
       {contentWarning && (
@@ -424,7 +686,17 @@ export default function ReportsIngestionHub() {
         <div className="xl:col-span-2 flex flex-col gap-6">
           <div
             onClick={handleFileClick}
-            className={`bg-surface-container-lowest border rounded-xl p-10 flex flex-col items-center justify-center border-dashed transition-colors cursor-pointer group h-[300px] ${selectedFile ? 'border-primary bg-primary/5' : 'border-surface-border hover:bg-surface-container-low'}`}
+            onDragOver={handleDragOver}
+            onDragEnter={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`bg-surface-container-lowest border rounded-xl p-10 flex flex-col items-center justify-center border-dashed transition-all cursor-pointer group h-[300px] ${
+              isDraggingOver
+                ? 'border-primary bg-primary/10 ring-2 ring-primary/40 scale-[1.01]'
+                : selectedFile
+                ? 'border-primary bg-primary/5'
+                : 'border-surface-border hover:bg-surface-container-low'
+            }`}
           >
             <input
               type="file"
@@ -436,33 +708,58 @@ export default function ReportsIngestionHub() {
 
             {selectedFile ? (
               <>
-                <div className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center mb-5 text-primary">
+                <div className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center mb-4 text-primary">
                   <CheckCircle2 size={32} />
                 </div>
-                <h3 className="text-[18px] font-semibold text-on-surface mb-2">File Selected</h3>
-                <p className="font-mono text-[14px] text-primary mb-6 text-center">{selectedFile.name}</p>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleUpload();
-                  }}
-                  disabled={uploadStatus === 'uploading' || isPipelineActive}
-                  className="px-6 py-2.5 bg-primary text-on-primary text-[12px] font-bold rounded-lg hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-70"
-                >
-                  {uploadStatus === 'uploading' && 'Uploading...'}
-                  {uploadStatus === 'done' && `Done! ID: ${reportId}`}
-                  {uploadStatus === 'error' && 'Failed - Retry'}
-                  {uploadStatus === 'idle' && 'Upload & Process'}
-                </button>
+                <h3 className="text-[18px] font-semibold text-on-surface mb-1">File Ready for Ingestion</h3>
+                <p className="font-mono text-[14px] text-primary mb-1 text-center font-medium">{selectedFile.name}</p>
+                <p className="text-[12px] text-on-surface-variant mb-5">
+                  {(selectedFile.size / 1024).toFixed(1)} KB · Ready to match against WBS
+                </p>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleUpload();
+                    }}
+                    disabled={uploadStatus === 'uploading' || isPipelineActive}
+                    className="px-6 py-2.5 bg-primary text-on-primary text-[12px] font-bold rounded-lg hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-70 cursor-pointer"
+                  >
+                    {uploadStatus === 'uploading' && 'Uploading & Matching...'}
+                    {uploadStatus === 'done' && 'Upload Complete'}
+                    {uploadStatus === 'error' && 'Failed - Retry'}
+                    {uploadStatus === 'idle' && 'Upload & Process'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleClearFile}
+                    className="px-4 py-2.5 border border-surface-border bg-surface-container-lowest text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high text-[12px] font-bold rounded-lg transition-colors cursor-pointer"
+                  >
+                    {uploadStatus === 'done' ? 'Upload Another' : 'Cancel'}
+                  </button>
+                </div>
               </>
             ) : (
               <>
-                <div className="w-16 h-16 bg-surface-container rounded-full flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
-                  <UploadCloud size={32} className="text-primary" />
+                <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-5 transition-transform duration-300 ${
+                  isDraggingOver ? 'bg-primary text-on-primary scale-110' : 'bg-surface-container text-primary group-hover:scale-105'
+                }`}>
+                  <UploadCloud size={32} />
                 </div>
-                <h3 className="text-[18px] font-semibold text-on-surface mb-2">Drag & Drop Reports</h3>
+                <h3 className="text-[18px] font-semibold text-on-surface mb-2">
+                  {isDraggingOver ? 'Drop Report File Here' : 'Drag & Drop Reports'}
+                </h3>
                 <p className="text-[14px] text-on-surface-variant mb-6 text-center">Support for TXT, CSV, and XLSX WBS exports.</p>
-                <button className="px-6 py-2.5 bg-surface-container-lowest text-primary text-[12px] font-bold rounded-lg hover:bg-surface-container-low transition-colors border border-surface-border shadow-sm">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fileInputRef.current?.click();
+                  }}
+                  className="px-6 py-2.5 bg-surface-container-lowest text-primary text-[12px] font-bold rounded-lg hover:bg-surface-container-low transition-colors border border-surface-border shadow-sm cursor-pointer"
+                >
                   Browse Files
                 </button>
               </>
@@ -470,47 +767,153 @@ export default function ReportsIngestionHub() {
           </div>
 
           <div className="bg-surface-container-lowest border border-surface-border rounded-xl p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center justify-between mb-4">
               <h3 className="text-[18px] font-semibold text-on-surface flex items-center gap-2">
                 <Mic className="text-primary" size={20} /> Local Voice Input
               </h3>
-              <span className={`px-3 py-1 bg-surface-container-low rounded text-[11px] font-semibold tracking-wider uppercase flex items-center gap-2 border border-surface-border ${voiceProcessed ? 'text-status-completed' : 'text-on-surface-variant'}`}>
-                {!voiceProcessed && <div className="w-2 h-2 rounded-full bg-status-conflict animate-pulse"></div>}
-                {voiceProcessed ? 'Processed' : 'Recording'}
+              <span
+                className={`px-3 py-1 rounded text-[11px] font-bold tracking-wider uppercase flex items-center gap-2 border ${
+                  isRecording
+                    ? 'bg-red-500/10 text-red-600 border-red-500/30'
+                    : voiceProcessed
+                    ? 'bg-status-completed/10 text-status-completed border-status-completed/30'
+                    : 'bg-surface-container-low text-on-surface-variant border-surface-border'
+                }`}
+              >
+                {isRecording && <div className="w-2 h-2 rounded-full bg-red-500 animate-ping"></div>}
+                {isRecording ? 'Listening...' : voiceProcessed ? 'Processed' : 'Mic Ready'}
               </span>
             </div>
 
-            <div className="h-20 bg-surface-container-low rounded-lg border border-surface-border mb-5 flex items-end justify-center gap-1.5 p-3 overflow-hidden">
-              {[20, 70, 40, 90, 30, 80, 100, 60, 40, 85, 30, 70].map((h, i) => (
-                <div
-                  key={i}
-                  className={`w-2 rounded-t-sm transition-all duration-500 ${voiceProcessed ? 'bg-status-completed' : 'bg-primary'}`}
-                  style={{ height: voiceProcessed ? '10%' : `${h}%`, opacity: 0.8 }}
-                ></div>
-              ))}
+            {voiceError && (
+              <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 rounded-lg text-[13px] flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle size={16} className="shrink-0 text-amber-600" />
+                  <span>{voiceError}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setVoiceError(null)}
+                  className="text-xs font-bold hover:underline cursor-pointer shrink-0"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {/* Audio Waveform Visualizer & Microphone Toggle */}
+            <div className="relative bg-surface-container-low rounded-lg border border-surface-border mb-4 p-4 flex flex-col items-center justify-center gap-3 overflow-hidden">
+              <div className="h-16 w-full flex items-end justify-center gap-1.5 px-4">
+                {waveformBars.map((h, i) => (
+                  <div
+                    key={i}
+                    className={`w-2.5 rounded-t-sm transition-all duration-150 ${
+                      isRecording
+                        ? 'bg-red-500'
+                        : voiceProcessed
+                        ? 'bg-status-completed'
+                        : 'bg-primary/70'
+                    }`}
+                    style={{ height: `${h}%` }}
+                  ></div>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-3 z-10">
+                {!isRecording ? (
+                  <button
+                    type="button"
+                    onClick={startVoiceRecording}
+                    className="px-4 py-2 bg-primary text-on-primary text-[13px] font-bold rounded-lg hover:bg-primary/90 transition-all flex items-center gap-2 shadow-sm cursor-pointer"
+                  >
+                    <Mic size={16} /> Start Recording
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={stopVoiceRecording}
+                    className="px-4 py-2 bg-red-600 text-white text-[13px] font-bold rounded-lg hover:bg-red-700 transition-all flex items-center gap-2 shadow-sm cursor-pointer animate-pulse"
+                  >
+                    <Square size={16} /> Stop Recording
+                  </button>
+                )}
+                <span className="text-[12px] text-on-surface-variant font-medium">
+                  {isRecording ? 'Speak clearly into your microphone...' : 'Click to speak or edit text directly'}
+                </span>
+              </div>
             </div>
 
-            <div className={`border rounded-lg p-5 mb-5 transition-colors ${voiceProcessed ? 'bg-status-completed/10 border-status-completed/20' : 'bg-surface-bright border-surface-border'}`}>
-              <p className="font-mono text-[13px] text-on-surface leading-relaxed">
-                &quot;Activity 24P201 foundation pour completed. Moving to curing phase. Next is steel erection on Monday...&quot;
-              </p>
+            {/* Live / Editable Transcript Field */}
+            <div className="mb-4">
+              <div className="flex justify-between items-center mb-1.5">
+                <label className="text-[12px] font-bold text-on-surface-variant uppercase tracking-wider">
+                  Field Transcript (Live & Editable)
+                </label>
+                {interimTranscript && (
+                  <span className="text-[11px] text-primary italic font-medium">
+                    Listening: &quot;{interimTranscript}&quot;
+                  </span>
+                )}
+              </div>
+              <textarea
+                rows={3}
+                value={voiceTranscript}
+                onChange={(e) => {
+                  setVoiceTranscript(e.target.value);
+                  setVoiceProcessed(false);
+                }}
+                placeholder="Spoken updates will appear here live as you speak. You can also type or edit directly..."
+                className={`w-full p-3 font-mono text-[13px] text-on-surface bg-surface-bright rounded-lg border focus:outline-none focus:ring-2 focus:ring-primary transition-colors ${
+                  voiceProcessed
+                    ? 'bg-status-completed/10 border-status-completed/30 text-status-completed'
+                    : 'border-surface-border'
+                }`}
+              />
             </div>
 
-            <div className="flex justify-end gap-3">
+            {/* Actions Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-surface-border">
               <button
-                onClick={() => setVoiceProcessed(false)}
-                className="px-5 py-2.5 border border-surface-border text-on-surface text-[12px] font-bold rounded-lg hover:bg-surface-container-high transition-colors bg-surface-container-lowest"
+                type="button"
+                onClick={handleLoadSampleVoice}
+                className="text-[12px] text-primary font-semibold hover:underline flex items-center gap-1.5 cursor-pointer"
               >
-                Reset
+                <FileText size={14} /> Insert Sample DPR Update
               </button>
-              <button
-                onClick={handleProcessVoice}
-                disabled={isProcessingVoice || voiceProcessed}
-                className={`px-5 py-2.5 text-[12px] font-bold rounded-lg transition-colors flex items-center gap-2 shadow-sm ${voiceProcessed ? 'bg-status-completed text-surface-container-lowest' : 'bg-primary text-on-primary hover:bg-primary/90'} disabled:opacity-70`}
-              >
-                {voiceProcessed ? <CheckCircle2 size={16} /> : <Sparkles size={16} />}
-                {isProcessingVoice ? 'Processing...' : voiceProcessed ? 'Processed Successfully' : 'Process Spoken Update'}
-              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleResetVoice}
+                  className="px-4 py-2 border border-surface-border text-on-surface text-[12px] font-bold rounded-lg hover:bg-surface-container-high transition-colors bg-surface-container-lowest cursor-pointer"
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  onClick={handleProcessVoice}
+                  disabled={isProcessingVoice || !voiceTranscript.trim() || isRecording}
+                  className={`px-5 py-2.5 text-[12px] font-bold rounded-lg transition-colors flex items-center gap-2 shadow-sm ${
+                    voiceProcessed
+                      ? 'bg-status-completed text-surface-container-lowest'
+                      : 'bg-primary text-on-primary hover:bg-primary/90'
+                  } disabled:opacity-50 cursor-pointer`}
+                >
+                  {isProcessingVoice ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" /> Processing Spoken Update...
+                    </>
+                  ) : voiceProcessed ? (
+                    <>
+                      <CheckCircle2 size={16} /> Processed Successfully
+                    </>
+                  ) : (
+                    <>
+                      <FileText size={16} /> Process Spoken Update
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -564,12 +967,19 @@ export default function ReportsIngestionHub() {
                       const rejected = row.processing_status === 'REJECTED' || row.processing_status === 'FAILED';
                       const isDemo = 'isFallback' in row && row.isFallback;
                       return (
-                        <tr key={row.report_id} className="hover:bg-audit-previous transition-colors">
+                        <tr
+                          key={row.report_id}
+                          onClick={() => setSelectedReportDetail(row)}
+                          title="Click to inspect report details and events"
+                          className="hover:bg-primary/5 transition-colors cursor-pointer group"
+                        >
                           <td className="px-5 py-3">
-                            <div className="font-mono text-[13px] text-on-surface">{row.filename}</div>
-                            <div className="text-[12px] text-on-surface-variant mt-1">
-                              {formatHistoryDate(row.created_at)}
-                              {isDemo && ' · Demo fallback'}
+                            <div className="font-mono text-[13px] text-on-surface group-hover:text-primary transition-colors flex items-center gap-1.5">
+                              {row.filename}
+                            </div>
+                            <div className="text-[12px] text-on-surface-variant mt-1 flex items-center gap-1">
+                              <span>{formatHistoryDate(row.created_at)}</span>
+                              {isDemo && <span className="text-status-review font-semibold">· Demo fallback</span>}
                             </div>
                           </td>
                           <td className="px-5 py-3">
@@ -593,6 +1003,93 @@ export default function ReportsIngestionHub() {
           </div>
         </div>
       </div>
+
+      {/* Interactive Report Inspection Modal */}
+      {selectedReportDetail && (
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fadeIn"
+          onClick={() => setSelectedReportDetail(null)}
+        >
+          <div
+            className="bg-surface-container-lowest border border-surface-border rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between border-b border-surface-border pb-4">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-primary bg-primary/10 px-2.5 py-1 rounded">
+                  Report Ingestion Record
+                </span>
+                <h3 className="text-[18px] font-semibold text-on-surface mt-2 font-mono">
+                  {selectedReportDetail.filename}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedReportDetail(null)}
+                className="text-on-surface-variant hover:text-on-surface p-1 rounded-lg hover:bg-surface-container"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 text-[13px]">
+              <div className="bg-surface-container-low p-3 rounded-xl border border-surface-border">
+                <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1">
+                  Report ID
+                </span>
+                <span className="font-mono text-on-surface font-semibold">
+                  {selectedReportDetail.report_id}
+                </span>
+              </div>
+              <div className="bg-surface-container-low p-3 rounded-xl border border-surface-border">
+                <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1">
+                  Status
+                </span>
+                <span className="font-bold text-status-completed">
+                  {formatHistoryStatus(selectedReportDetail.processing_status)}
+                </span>
+              </div>
+              <div className="bg-surface-container-low p-3 rounded-xl border border-surface-border">
+                <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1">
+                  Ingestion Time (Local)
+                </span>
+                <span className="text-on-surface font-medium">
+                  {formatHistoryDate(selectedReportDetail.created_at)}
+                </span>
+              </div>
+              <div className="bg-surface-container-low p-3 rounded-xl border border-surface-border">
+                <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1">
+                  Project
+                </span>
+                <span className="font-bold text-on-surface">Project Alpha (24P201)</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-surface-border">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedReportDetail(null);
+                  router.push('/review-queue');
+                }}
+                className="px-4 py-2 bg-surface-container-low hover:bg-surface-container-high border border-surface-border text-[12px] font-bold rounded-lg text-on-surface transition-colors cursor-pointer"
+              >
+                Open Review Queue
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedReportDetail(null);
+                  router.push('/audit-trail');
+                }}
+                className="px-4 py-2 bg-primary text-on-primary text-[12px] font-bold rounded-lg hover:bg-primary/90 transition-colors shadow-sm cursor-pointer"
+              >
+                View in Audit Trail
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

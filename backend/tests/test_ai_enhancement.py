@@ -128,7 +128,7 @@ def test_6_top_k_retrieval(db_session, ephemeral_chroma):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def test_7_project_isolation(db_session, ephemeral_chroma):
-    """Tests that queries for Project Alpha never retrieve Project Beta activities."""
+    """Tests that queries for PragatiSetu never retrieve Project Beta activities."""
     # Create Project Beta activity
     proj_b = Project(project_id="PROJ-BETA", name="Project Beta")
     db_session.add(proj_b)

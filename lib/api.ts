@@ -13,10 +13,16 @@ export async function apiFetch<T = unknown>(path: string, init?: RequestInit): P
   return res.json() as Promise<T>;
 }
 
-/** Non-throwing fetch — use in pipelines where graceful fallback is required. */
-export async function apiFetchSafe<T = unknown>(path: string, init?: RequestInit): Promise<ApiResult<T>> {
+/** Non-throwing fetch with timeout — use in pipelines where graceful fallback is required. */
+export async function apiFetchSafe<T = unknown>(path: string, init?: RequestInit, timeoutMs = 8000): Promise<ApiResult<T>> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${API_BASE}${path}`, init);
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      signal: init?.signal ?? controller.signal,
+    });
+    clearTimeout(timer);
     if (!res.ok) {
       let error = `${res.status} ${res.statusText}`;
       try {
@@ -30,9 +36,10 @@ export async function apiFetchSafe<T = unknown>(path: string, init?: RequestInit
     const data = (await res.json()) as T;
     return { ok: true, data };
   } catch (err) {
+    clearTimeout(timer);
     return {
       ok: false,
-      error: err instanceof Error ? err.message : 'Network error',
+      error: err instanceof Error ? (err.name === 'AbortError' ? 'Request timed out' : err.message) : 'Network error',
     };
   }
 }

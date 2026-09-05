@@ -6,7 +6,7 @@ from datetime import date
 def test_full_e2e_backend_pipeline_integration(client):
     """
     Complete end-to-end integration test verifying the entire PragatiSetu backend workflow:
-    1. Select Project Alpha
+    1. Select PragatiSetu
     2. Upload Baseline Schedule Excel
     3. Upload Field Progress DPR Report
     4. Extract Events
@@ -17,12 +17,12 @@ def test_full_e2e_backend_pipeline_integration(client):
     9. Retrieve Project Dashboard Metrics
     10. Retrieve Audit Trail Snapshot Log
     """
-    # 1. Retrieve Project Alpha
+    # 1. Retrieve PragatiSetu
     proj_res = client.get("/projects/PROJ-ALPHA")
     if proj_res.status_code == 404:
         proj_res = client.post("/projects", json={
             "project_id": "PROJ-ALPHA",
-            "name": "Project Alpha",
+            "name": "PragatiSetu",
             "description": "Refinery Extension"
         })
     assert proj_res.status_code in [200, 201]

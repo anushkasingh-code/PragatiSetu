@@ -19,7 +19,7 @@ def test_project_alpha_import(db_session):
 
     proj = db_session.query(Project).filter(Project.project_id == "PROJ-ALPHA").first()
     assert proj is not None
-    assert proj.name.startswith("Project Alpha")
+    assert proj.name.startswith("PragatiSetu")
 
     activities = db_session.query(ScheduleActivity).filter(ScheduleActivity.project_id == "PROJ-ALPHA").all()
     assert len(activities) == 75
