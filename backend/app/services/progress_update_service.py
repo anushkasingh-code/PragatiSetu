@@ -128,6 +128,13 @@ class ProgressUpdateService:
             proposed_finish=proposed_finish
         )
 
+        # BUG-015: Validate state transition
+        if not validate_state_transition(activity.status, proposed_status):
+            conflicts.append({
+                "type": "STATUS_CONFLICT",
+                "message": f"Invalid state transition from '{activity.status}' to '{proposed_status}'."
+            })
+
         # If conflicts exist, route to CONFLICT_REVIEW and do NOT mutate schedule
         if conflicts:
             # Update decision record to CONFLICT_REVIEW so it appears in review queue

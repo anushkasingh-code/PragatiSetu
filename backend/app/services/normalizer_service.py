@@ -1,7 +1,7 @@
 import os
 import re
 import pandas as pd
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 
 DATASET_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "dataset")
 
@@ -99,14 +99,17 @@ def normalize_project_id(pid: Optional[str], event_raw_text: Optional[str] = Non
     """
     Normalizes project identifier variants across the matching & retrieval pipeline
     (e.g., ALPHA-001, ALPHA, PROJECT-ALPHA, 24P201, PRAGATI-01 -> PROJ-ALPHA).
-    Also detects project from event raw text or database baseline schedule activity presence.
+    Also detects project from event raw text.
+    Never silently falls back to PROJ-ALPHA for unknown projects.
     """
-    cleaned = str(pid).strip() if pid else ""
-    cleaned_upper = cleaned.upper()
-    if cleaned_upper in ("ALPHA-001", "ALPHA", "PROJECT-ALPHA", "PROJ_ALPHA", "PRAGATI-01", "24P201", "PROJ-ALPHA"):
-        return "PROJ-ALPHA"
-    if cleaned_upper in ("BETA-001", "BETA", "PROJECT-BETA", "PROJ_BETA", "PROJ-BETA"):
-        return "PROJ-BETA"
+    cleaned = str(pid).strip() if pid and str(pid).strip() and str(pid).strip() != "None" else ""
+
+    if cleaned:
+        cleaned_upper = cleaned.upper()
+        if cleaned_upper in ("ALPHA-001", "ALPHA", "PROJECT-ALPHA", "PROJ_ALPHA", "PRAGATI-01", "24P201", "PROJ-ALPHA"):
+            return "PROJ-ALPHA"
+        if cleaned_upper in ("BETA-001", "BETA", "PROJECT-BETA", "PROJ_BETA", "PROJ-BETA"):
+            return "PROJ-BETA"
 
     if event_raw_text:
         text_upper = str(event_raw_text).upper()
@@ -115,16 +118,7 @@ def normalize_project_id(pid: Optional[str], event_raw_text: Optional[str] = Non
         if "BETA-001" in text_upper or "PROJ-BETA" in text_upper or "PROJECT BETA" in text_upper:
             return "PROJ-BETA"
 
-    if db is not None and cleaned:
-        try:
-            from backend.app.db.models.activity import ScheduleActivity
-            has_act = db.query(ScheduleActivity).filter(ScheduleActivity.project_id == cleaned).first()
-            if not has_act:
-                has_alpha = db.query(ScheduleActivity).filter(ScheduleActivity.project_id == "PROJ-ALPHA").first()
-                if has_alpha:
-                    return "PROJ-ALPHA"
-        except Exception:
-            pass
-
-    return cleaned if cleaned else "PROJ-ALPHA"
+    # Preserves actual cleaned ID if provided, or empty string if absent.
+    # NEVER silently defaults an unknown project ID to PROJ-ALPHA.
+    return cleaned
 

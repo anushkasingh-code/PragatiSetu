@@ -86,7 +86,7 @@ def get_event_candidates(event_id: str, db: Session = Depends(get_db)):
     
     top_2_margin = None
     if len(candidates) >= 2:
-        top_2_margin = round(candidates[0].overall_score - candidates[1].overall_score, 2)
+        top_2_margin = round(float(candidates[0].overall_score) - float(candidates[1].overall_score), 2)
 
     return {
         "event_id": event.event_id,

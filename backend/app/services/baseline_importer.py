@@ -2,7 +2,7 @@ import os
 import logging
 import datetime
 import pandas as pd
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from backend.app.db.models.project import Project
 from backend.app.db.models.wbs import WBSNode
@@ -17,17 +17,19 @@ from backend.app.services.validation import (
 from backend.app.services.ai.vector_indexer import index_schedule_activities
 from backend.app.services.normalizer_service import normalize_project_id
 
-def _normalize_project_id(pid: str) -> str:
-    return normalize_project_id(pid)
+def _normalize_project_id(pid: Any) -> str:
+    return normalize_project_id(str(pid) if pid is not None else None)
 
 
 class BaselineImporter:
     def __init__(self, db_session: Session):
         self.db = db_session
 
-    def import_excel_baseline(self, file_path: str) -> Dict[str, Any]:
+    def import_excel_baseline(self, file_path: str, target_project_id: Optional[str] = None) -> Dict[str, Any]:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Baseline schedule file not found at: {file_path}")
+
+        target_proj_norm = _normalize_project_id(target_project_id) if target_project_id else None
 
         excel_file = pd.ExcelFile(file_path)
         sheets = excel_file.sheet_names
@@ -46,8 +48,12 @@ class BaselineImporter:
             df_proj = pd.read_excel(file_path, sheet_name="Project")
             for _, row in df_proj.iterrows():
                 row_dict = row.to_dict()
-                proj_id = _normalize_project_id(str(row_dict["project_id"]))
-                proj_name = str(row_dict["name"]).strip()
+                raw_sheet_proj = row_dict.get("project_id")
+                sheet_proj_id = _normalize_project_id(raw_sheet_proj) if pd.notnull(raw_sheet_proj) and str(raw_sheet_proj).strip() else None
+                if target_proj_norm and sheet_proj_id and sheet_proj_id != target_proj_norm:
+                    raise ValueError(f"Project ID mismatch: Spreadsheet specifies '{sheet_proj_id}' but endpoint target is '{target_proj_norm}'.")
+                proj_id = target_proj_norm or (sheet_proj_id if sheet_proj_id else "PROJ-ALPHA")
+                proj_name = str(row_dict.get("name", f"Project {proj_id}")).strip()
                 proj_desc = str(row_dict["description"]) if pd.notnull(row_dict.get("description")) else None
                 
                 existing_proj = self.db.query(Project).filter(Project.project_id == proj_id).first()
@@ -64,12 +70,17 @@ class BaselineImporter:
                 stats["projects_imported"] += 1
         elif "Baseline" in sheets:
             df_base = pd.read_excel(file_path, sheet_name="Baseline")
-            df_base_projs = df_base[["project_id", "project_name"]].copy()
+            df_base_projs = df_base[["project_id", "project_name"]].copy() if "project_name" in df_base.columns else df_base[["project_id"]].copy()
+            if "project_name" not in df_base_projs.columns:
+                df_base_projs["project_name"] = df_base_projs["project_id"]
             df_base_projs["norm_proj_id"] = df_base_projs["project_id"].apply(_normalize_project_id)
             unique_projs = df_base_projs[["norm_proj_id", "project_name"]].drop_duplicates()
             for _, row in unique_projs.iterrows():
                 row_dict = row.to_dict()
-                proj_id = str(row_dict["norm_proj_id"]).strip()
+                sheet_proj_id = str(row_dict["norm_proj_id"]).strip()
+                if target_proj_norm and sheet_proj_id and sheet_proj_id != target_proj_norm:
+                    raise ValueError(f"Project ID mismatch: Spreadsheet specifies '{sheet_proj_id}' but endpoint target is '{target_proj_norm}'.")
+                proj_id = target_proj_norm or sheet_proj_id
                 proj_name = str(row_dict["project_name"]).strip()
                 existing_proj = self.db.query(Project).filter(Project.project_id == proj_id).first()
                 if not existing_proj:
@@ -78,6 +89,12 @@ class BaselineImporter:
                 else:
                     existing_proj.name = proj_name
                     existing_proj.description = f"{proj_name} Baseline Project"
+                stats["projects_imported"] += 1
+        elif target_proj_norm:
+            existing_proj = self.db.query(Project).filter(Project.project_id == target_proj_norm).first()
+            if not existing_proj:
+                proj = Project(project_id=target_proj_norm, name=f"Project {target_proj_norm}", description=f"{target_proj_norm} Baseline Project")
+                self.db.add(proj)
                 stats["projects_imported"] += 1
 
         self.db.flush()
@@ -92,7 +109,11 @@ class BaselineImporter:
             for _, row in df_wbs.iterrows():
                 row_dict = row.to_dict()
                 wbs_id = str(row_dict["wbs_id"]).strip()
-                proj_id = _normalize_project_id(str(row_dict["project_id"]))
+                raw_wbs_proj = row_dict.get("project_id")
+                sheet_proj = _normalize_project_id(raw_wbs_proj) if pd.notnull(raw_wbs_proj) and str(raw_wbs_proj).strip() else None
+                if target_proj_norm and sheet_proj and sheet_proj != target_proj_norm:
+                    raise ValueError(f"Project ID mismatch in WBS: Spreadsheet specifies '{sheet_proj}' but endpoint target is '{target_proj_norm}'.")
+                proj_id = target_proj_norm or (sheet_proj if sheet_proj else "PROJ-ALPHA")
                 parent_id = str(row_dict["parent_wbs_id"]).strip() if pd.notnull(row_dict.get("parent_wbs_id")) and str(row_dict.get("parent_wbs_id")).strip() != "None" else None
                 level = int(float(str(row_dict["level"])))
                 name = str(row_dict["name"]).strip()
@@ -108,6 +129,7 @@ class BaselineImporter:
                     )
                     self.db.add(wbs)
                 else:
+                    existing_wbs.project_id = proj_id
                     existing_wbs.name = name
                     existing_wbs.level = level
                     existing_wbs.parent_wbs_id = parent_id
@@ -118,7 +140,11 @@ class BaselineImporter:
             wbs_nodes_seen = set()
             for _, row in df_base.iterrows():
                 row_dict = row.to_dict()
-                proj_id = _normalize_project_id(str(row_dict["project_id"]))
+                raw_wbs_proj = row_dict.get("project_id")
+                sheet_proj = _normalize_project_id(raw_wbs_proj) if pd.notnull(raw_wbs_proj) and str(raw_wbs_proj).strip() else None
+                if target_proj_norm and sheet_proj and sheet_proj != target_proj_norm:
+                    raise ValueError(f"Project ID mismatch in WBS: Spreadsheet specifies '{sheet_proj}' but endpoint target is '{target_proj_norm}'.")
+                proj_id = target_proj_norm or (sheet_proj if sheet_proj else "PROJ-ALPHA")
                 l1 = str(row_dict["wbs_level_1"]).strip() if pd.notnull(row_dict.get("wbs_level_1")) else None
                 l2 = str(row_dict["wbs_level_2"]).strip() if pd.notnull(row_dict.get("wbs_level_2")) else None
                 l3 = str(row_dict["wbs_level_3"]).strip() if pd.notnull(row_dict.get("wbs_level_3")) else None
@@ -153,7 +179,11 @@ class BaselineImporter:
             for _, row in df_act.iterrows():
                 row_dict = row.to_dict()
                 act_id = str(row_dict["activity_id"]).strip()
-                proj_id = _normalize_project_id(str(row_dict["project_id"]))
+                raw_act_proj = row_dict.get("project_id")
+                sheet_proj = _normalize_project_id(raw_act_proj) if pd.notnull(raw_act_proj) and str(raw_act_proj).strip() else None
+                if target_proj_norm and sheet_proj and sheet_proj != target_proj_norm:
+                    raise ValueError(f"Project ID mismatch in Activity '{act_id}': Spreadsheet specifies '{sheet_proj}' but endpoint target is '{target_proj_norm}'.")
+                proj_id = target_proj_norm or (sheet_proj if sheet_proj else "PROJ-ALPHA")
                 
                 # Handle wbs_id
                 wbs_id = None

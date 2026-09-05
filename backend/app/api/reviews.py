@@ -1,3 +1,4 @@
+from typing import Optional, List, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend.app.db.database import get_db
@@ -37,7 +38,7 @@ def submit_human_review_decision(event_id: str, payload: HumanReviewRequest, db:
 @router.get("/projects/{project_id}/reviews/pending", status_code=status.HTTP_200_OK)
 @router.get("/reviews/pending", status_code=status.HTTP_200_OK)
 def get_pending_reviews(
-    project_id: str = "PROJ-ALPHA",
+    project_id: Optional[str] = None,
     limit: int = 1000,
     db: Session = Depends(get_db)
 ):
@@ -46,6 +47,12 @@ def get_pending_reviews(
     Aggregates ExtractedEvent, MatchDecision, MatchCandidate, and ScheduleActivity data.
     Ordered by SourceReport.created_at descending so newly uploaded DPRs and voice notes appear first.
     """
+    if not project_id or not project_id.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="project_id parameter is required for review queries."
+        )
+
     from backend.app.db.models.report import SourceReport
     from backend.app.db.models.event import ExtractedEvent
     from backend.app.db.models.decision import MatchDecision
@@ -66,116 +73,214 @@ def get_pending_reviews(
         .order_by(SourceReport.created_at.desc())
         .all()
     )
+    if not reports:
+        return []
 
-    items = []
-    act_cache: dict[str, dict] = {}
+    report_map = {r.report_id: r for r in reports}
+    report_ids = [r.report_id for r in reports]
 
-    for rep in reports:
-        events = (
-            db.query(ExtractedEvent)
-            .filter(ExtractedEvent.report_id == rep.report_id)
-            .order_by(ExtractedEvent.created_at.desc())
-            .all()
-        )
-        for evt in events:
-            dec = db.query(MatchDecision).filter(MatchDecision.event_id == evt.event_id).first()
-            if not dec:
-                try:
-                    dec_srv = DecisionService(db)
-                    _, dec = dec_srv.make_decision_for_event(evt.event_id)
-                except Exception:
-                    continue
+    events = (
+        db.query(ExtractedEvent)
+        .filter(ExtractedEvent.report_id.in_(report_ids))
+        .order_by(ExtractedEvent.created_at.desc())
+        .all()
+    )
+    if not events:
+        return []
 
-            if not dec or dec.decision not in pending_decisions:
+    event_ids = [evt.event_id for evt in events]
+
+    # Batch fetch existing decisions
+    existing_decisions = (
+        db.query(MatchDecision)
+        .filter(MatchDecision.event_id.in_(event_ids))
+        .all()
+    )
+    decision_map = {d.event_id: d for d in existing_decisions}
+
+    # Evaluate any missing decisions
+    dec_srv = None
+    for evt in events:
+        if evt.event_id not in decision_map:
+            if dec_srv is None:
+                dec_srv = DecisionService(db)
+            try:
+                _, dec = dec_srv.make_decision_for_event(evt.event_id)
+                if dec:
+                    decision_map[evt.event_id] = dec
+            except Exception:
                 continue
 
-            cands = (
-                db.query(MatchCandidate)
-                .filter(MatchCandidate.event_id == evt.event_id)
-                .order_by(MatchCandidate.rank.asc())
-                .limit(5)
-                .all()
-            )
+    # Filter for pending review events
+    pending_events = [
+        evt for evt in events
+        if evt.event_id in decision_map and decision_map[evt.event_id].decision in pending_decisions
+    ]
+    if not pending_events:
+        return []
 
-            # Auto-regenerate if candidates are missing or empty due to stale unnormalized state
-            if not cands:
-                try:
-                    gen_srv = CandidateGeneratorService(db)
-                    _, cands, _ = gen_srv.generate_candidates_for_event(evt.event_id)
-                    dec_srv = DecisionService(db)
-                    _, dec = dec_srv.make_decision_for_event(evt.event_id)
-                except Exception:
-                    pass
+    pending_event_ids = [evt.event_id for evt in pending_events]
 
-            cand_list = []
-            item_acts = {}
-            for c in cands:
-                cand_list.append({
-                    "activity_id": c.activity_id,
-                    "rank": c.rank,
-                    "overall_score": round(c.overall_score, 1),
-                })
-                if c.activity_id not in act_cache:
-                    act = db.query(ScheduleActivity).filter(ScheduleActivity.activity_id == c.activity_id).first()
-                    if act:
-                        act_cache[c.activity_id] = {
-                            "activity_id": act.activity_id,
-                            "description": act.description,
-                            "equipment_or_line_id": act.equipment_or_line_id or act.activity_id,
-                        }
-                if c.activity_id in act_cache:
-                    item_acts[c.activity_id] = act_cache[c.activity_id]
+    # Batch fetch candidates for pending events
+    all_candidates = (
+        db.query(MatchCandidate)
+        .filter(MatchCandidate.event_id.in_(pending_event_ids))
+        .order_by(MatchCandidate.rank.asc())
+        .all()
+    )
+    cands_by_event: dict[str, list] = {}
+    for c in all_candidates:
+        cands_by_event.setdefault(c.event_id, []).append(c)
 
-            items.append({
-                "event": {
-                    "event_id": evt.event_id,
-                    "report_id": evt.report_id,
-                    "raw_text": evt.raw_text,
-                    "identifier": evt.identifier,
-                    "action": evt.action,
-                    "object": evt.object,
-                    "location": evt.location,
-                    "status": evt.status,
-                    "percent_complete": evt.percent_complete,
-                    "event_date": str(evt.event_date) if evt.event_date else None,
-                    "source_filename": rep.filename,
-                },
-                "decision": {
-                    "event_id": dec.event_id,
-                    "decision": dec.decision,
-                    "top_activity_id": dec.top_activity_id,
-                    "match_confidence": round(dec.match_confidence, 1),
-                    "reasons": dec.reasons or [],
-                },
-                "candidates": cand_list,
-                "activities": item_acts,
-                "isFallback": False
+    # Auto-regenerate if candidates are missing or empty
+    gen_srv = None
+    for evt in pending_events:
+        if not cands_by_event.get(evt.event_id):
+            if gen_srv is None:
+                gen_srv = CandidateGeneratorService(db)
+            if dec_srv is None:
+                dec_srv = DecisionService(db)
+            try:
+                _, cands, _ = gen_srv.generate_candidates_for_event(evt.event_id)
+                _, dec = dec_srv.make_decision_for_event(evt.event_id)
+                if dec:
+                    decision_map[evt.event_id] = dec
+                if cands:
+                    cands_by_event[evt.event_id] = sorted(cands, key=lambda x: x.rank)
+            except Exception:
+                pass
+
+    # Collect all activity IDs to fetch in a single query
+    activity_ids_to_fetch = set()
+    for evt in pending_events:
+        for c in cands_by_event.get(evt.event_id, [])[:5]:
+            if c.activity_id:
+                activity_ids_to_fetch.add(c.activity_id)
+
+    activity_map = {}
+    if activity_ids_to_fetch:
+        acts = (
+            db.query(ScheduleActivity)
+            .filter(ScheduleActivity.activity_id.in_(list(activity_ids_to_fetch)))
+            .all()
+        )
+        for act in acts:
+            activity_map[act.activity_id] = {
+                "activity_id": act.activity_id,
+                "description": act.description,
+                "equipment_or_line_id": act.equipment_or_line_id or act.activity_id,
+            }
+
+    # Assemble response items
+    items = []
+    for evt in pending_events:
+        dec = decision_map[evt.event_id]
+        cands = cands_by_event.get(evt.event_id, [])[:5]
+
+        cand_list = []
+        item_acts = {}
+        for c in cands:
+            cand_list.append({
+                "activity_id": c.activity_id,
+                "rank": c.rank,
+                "overall_score": round(c.overall_score, 1),
             })
+            if c.activity_id in activity_map:
+                item_acts[c.activity_id] = activity_map[c.activity_id]
 
-            if len(items) >= limit:
-                break
+        rep = report_map.get(evt.report_id)
+        source_filename = rep.filename if rep else ""
+
+        items.append({
+            "event": {
+                "event_id": evt.event_id,
+                "report_id": evt.report_id,
+                "raw_text": evt.raw_text,
+                "identifier": evt.identifier,
+                "action": evt.action,
+                "object": evt.object,
+                "location": evt.location,
+                "status": evt.status,
+                "percent_complete": evt.percent_complete,
+                "event_date": str(evt.event_date) if evt.event_date else None,
+                "source_filename": source_filename,
+            },
+            "decision": {
+                "event_id": dec.event_id,
+                "decision": dec.decision,
+                "top_activity_id": dec.top_activity_id,
+                "match_confidence": round(dec.match_confidence, 1),
+                "reasons": dec.reasons or [],
+            },
+            "candidates": cand_list,
+            "activities": item_acts,
+            "isFallback": False
+        })
+
         if len(items) >= limit:
             break
 
     return items
 
 
+@router.post("/projects/{project_id}/reviews/reset-demo", status_code=status.HTTP_200_OK)
 @router.post("/reviews/reset", status_code=status.HTTP_200_OK)
-def reset_reviews_demo(db: Session = Depends(get_db)):
+def reset_reviews_demo(
+    project_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
     """
-    Convenience endpoint for demo/testing.
-    Resets all match decisions back to HUMAN_REVIEW and resets schedule activities to NOT_STARTED.
+    Demo/testing convenience endpoint scoped to a specific project.
+    Gated to non-production environments.
+    Only resets match decisions and activities for the specified project.
     """
+    from backend.app.config import settings
+    if getattr(settings, "ENVIRONMENT", "production").lower() == "production":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Reset operations are disabled in production environment."
+        )
+
+    if not project_id or not project_id.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="project_id parameter is required for demo reviews reset."
+        )
+
+    from backend.app.db.models.report import SourceReport
+    from backend.app.db.models.event import ExtractedEvent
     from backend.app.db.models.decision import MatchDecision
     from backend.app.db.models.activity import ScheduleActivity
-    from backend.app.db.models.audit import AuditRecord
+    from backend.app.services.normalizer_service import normalize_project_id
 
-    db.query(MatchDecision).update({MatchDecision.decision: "HUMAN_REVIEW"})
-    db.query(ScheduleActivity).filter(ScheduleActivity.activity_id.in_(["CIV-101", "CIV-114"])).update({
+    target_project = normalize_project_id(project_id)
+
+    # Reset only decisions belonging to events in this project's reports
+    report_ids = [
+        r.report_id for r in db.query(SourceReport.report_id)
+        .filter((SourceReport.project_id == project_id) | (SourceReport.project_id == target_project))
+        .all()
+    ]
+    if report_ids:
+        event_ids = [
+            e.event_id for e in db.query(ExtractedEvent.event_id)
+            .filter(ExtractedEvent.report_id.in_(report_ids))
+            .all()
+        ]
+        if event_ids:
+            db.query(MatchDecision).filter(MatchDecision.event_id.in_(event_ids)).update(
+                {MatchDecision.decision: "HUMAN_REVIEW"}, synchronize_session=False
+            )
+
+    # Reset activities belonging strictly to this project
+    db.query(ScheduleActivity).filter(
+        (ScheduleActivity.project_id == project_id) | (ScheduleActivity.project_id == target_project)
+    ).update({
         ScheduleActivity.status: "NOT_STARTED",
         ScheduleActivity.percent_complete: 0.0,
         ScheduleActivity.actual_start: None,
         ScheduleActivity.actual_finish: None,
     }, synchronize_session=False)
+
     db.commit()
-    return {"status": "ok", "message": "Demo reviews reset successfully."}
+    return {"status": "ok", "message": f"Demo reviews reset successfully for project '{project_id}'."}

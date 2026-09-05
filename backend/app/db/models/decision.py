@@ -7,7 +7,7 @@ from typing import Any
 
 class DecisionEnum(str, enum.Enum):
     AUTO_LINK = "AUTO_LINK"
-    AUTO_LINK_ELIGIBLE = "AUTO_LINK"  # Alias accepted by architecture docs
+    AUTO_LINK_ELIGIBLE = "AUTO_LINK_ELIGIBLE"
     HUMAN_REVIEW = "HUMAN_REVIEW"
     UNPLANNED_REVIEW = "UNPLANNED_REVIEW"
     CONFLICT_REVIEW = "CONFLICT_REVIEW"

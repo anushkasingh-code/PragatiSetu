@@ -1,4 +1,6 @@
+import os
 import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,13 +31,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger("pragatisetu")
 
-# Ensure database tables exist
-Base.metadata.create_all(bind=engine)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initializes database tables and directories on application startup."""
+    Base.metadata.create_all(bind=engine)
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    os.makedirs(settings.AUDIO_UPLOAD_DIR, exist_ok=True)
+    logger.info("PragatiSetu backend initialized successfully.")
+    yield
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="PragatiSetu — Standalone REST API backend bridging baseline project schedules and field progress reports.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Configurable CORS Middleware

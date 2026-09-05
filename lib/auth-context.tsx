@@ -16,8 +16,14 @@ export interface AuthUser {
   workerId: string;
   siteLocation: string;
   avatarUrl?: string;
+  isDemoPersona?: boolean;
 }
 
+/**
+ * CLIENT-ONLY DEMO PERSONAS FOR SIH PROTOTYPE SIMULATION ONLY.
+ * These personas provide quick role-switching in the prototype frontend.
+ * They are strictly isolated and MUST NOT be mistaken for real backend enterprise authentication (e.g. OAuth / SSO).
+ */
 export const DEMO_PERSONAS: AuthUser[] = [
   {
     id: 'USR-001',
@@ -27,6 +33,7 @@ export const DEMO_PERSONAS: AuthUser[] = [
     workerId: 'WKR-OIL-2026',
     siteLocation: 'Pump Area · Section A',
     avatarUrl: 'https://picsum.photos/seed/ramesh/100/100',
+    isDemoPersona: true,
   },
   {
     id: 'USR-002',
@@ -36,6 +43,7 @@ export const DEMO_PERSONAS: AuthUser[] = [
     workerId: 'ENG-OIL-4019',
     siteLocation: 'Pipe Rack Corridor · Section B',
     avatarUrl: 'https://picsum.photos/seed/priya/100/100',
+    isDemoPersona: true,
   },
   {
     id: 'USR-003',
@@ -45,6 +53,7 @@ export const DEMO_PERSONAS: AuthUser[] = [
     workerId: 'PLN-HQ-104',
     siteLocation: 'Central Planning & Scheduling Cell',
     avatarUrl: 'https://picsum.photos/seed/miller/100/100',
+    isDemoPersona: true,
   },
 ];
 
@@ -130,12 +139,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     role: WorkerRole = 'Site Supervisor',
     workerId?: string
   ) => {
+    const cleanEmail = (email || '').trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+      return false;
+    }
+
     const randomId = Math.random().toString(36).substring(2, 7);
     const displayName = name.trim() || 'Site Worker';
     const newUser: AuthUser = {
       id: `USR-${randomId}`,
       name: displayName,
-      email: email.trim(),
+      email: cleanEmail,
       role,
       workerId: workerId?.trim() || `WKR-${randomId.toUpperCase()}`,
       siteLocation: 'Site Execution Sector 4',
@@ -167,7 +182,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider
       value={{
-        user: mounted ? user : DEMO_PERSONAS[0],
+        user: mounted ? user : null,
         isAuthModalOpen,
         authModalTab,
         openLoginModal,

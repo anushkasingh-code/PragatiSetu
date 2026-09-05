@@ -3,8 +3,7 @@
 import { Suspense } from 'react';
 import { apiFetchSafe } from '@/lib/api';
 import { useAppDataRefresh } from '@/lib/app-sync';
-import { getFallbackMetrics, getPendingFallbackReviews } from '@/lib/report-fallback';
-import { getDeletedProjectCodes, isProjectDeleted, FALLBACK_PROJECTS } from '@/lib/projects';
+import { getDeletedProjectCodes } from '@/lib/projects';
 import { Eye, ArrowRight, Activity, Clock, Layers } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
@@ -80,16 +79,6 @@ function DashboardContent() {
         }));
     }
 
-    if (available.length === 0 && (!res.ok || res.data.length === 0)) {
-      const activeFallbacks = FALLBACK_PROJECTS.filter((p) => !deleted.has(p.code));
-      available = activeFallbacks.map((p) => ({
-        project_id: p.code,
-        name: p.name,
-        displayCode: p.displayCode,
-        description: 'PragatiSetu Infrastructure Construction Package',
-      }));
-    }
-
     if (available.length === 0) {
       setActiveProject(null);
       return null;
@@ -117,8 +106,6 @@ function DashboardContent() {
     }
 
     const projectId = currentProj.project_id;
-    const fallbackMetrics = getFallbackMetrics();
-    const pendingFallback = isProjectDeleted(projectId) ? 0 : getPendingFallbackReviews(projectId).length;
 
     // Fetch real reports for Recent Field Ingestions
     apiFetchSafe<any[]>(`/projects/${encodeURIComponent(projectId)}/reports`).then((res) => {
@@ -172,16 +159,13 @@ function DashboardContent() {
         }
 
         if (data.total_events != null && data.total_events > 0 && data.auto_linked_events != null) {
-          const totalEvents = data.total_events + fallbackMetrics.eventsDelta;
           const autoLinked = data.auto_linked_events ?? 0;
-          setAiAccuracy(totalEvents > 0 ? Math.round((autoLinked / totalEvents) * 1000) / 10 : null);
-        } else if (fallbackMetrics.eventsDelta > 0) {
-          setAiAccuracy(0);
+          setAiAccuracy(Math.round((autoLinked / data.total_events) * 1000) / 10);
         } else {
           setAiAccuracy(null);
         }
 
-        const humanReviews = (data.human_review_events ?? 0) + (data.unplanned_events ?? 0) + pendingFallback;
+        const humanReviews = (data.human_review_events ?? 0) + (data.unplanned_events ?? 0);
         const conflicts = data.conflict_events ?? 0;
         setHumanReviewEvents(humanReviews);
         setConflictEvents(conflicts);

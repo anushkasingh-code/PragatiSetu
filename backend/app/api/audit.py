@@ -1,6 +1,7 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.orm import Session
+from backend.app.config import settings
 from backend.app.db.database import get_db
 from backend.app.db.models.audit import AuditRecord
 from backend.app.schemas.audit import AuditRecordResponse
@@ -36,14 +37,35 @@ def query_audit_trail(
     return records
 
 @router.post("/audit/clear", status_code=status.HTTP_200_OK)
-def clear_audit_trail(db: Session = Depends(get_db)):
+def clear_audit_trail(
+    project_id: Optional[str] = Query(None, description="Project ID to clear demo audit logs for"),
+    db: Session = Depends(get_db)
+):
     """
-    Clears all audit records to allow a clean inspection workspace for the next batch of work.
+    Clears audit records strictly scoped to a specific project.
+    Gated to non-production environments; production audit trail is append-only and immutable.
     """
-    deleted_count = db.query(AuditRecord).delete()
+    if getattr(settings, "ENVIRONMENT", "production").lower() == "production":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Audit trail is immutable in production. Clear operation is disabled."
+        )
+
+    if not project_id or not project_id.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="project_id parameter is required to clear audit records."
+        )
+
+    from backend.app.services.normalizer_service import normalize_project_id
+    target_project = normalize_project_id(project_id)
+
+    deleted_count = db.query(AuditRecord).filter(
+        (AuditRecord.project_id == project_id) | (AuditRecord.project_id == target_project)
+    ).delete(synchronize_session=False)
     db.commit()
     return {
         "status": "cleared",
-        "message": "Audit trail cleared successfully.",
+        "message": f"Audit trail cleared successfully for project '{project_id}'.",
         "deleted_count": deleted_count
     }

@@ -4,17 +4,9 @@ import { notifyAppDataRefresh, useAppDataRefresh } from '@/lib/app-sync';
 import { Suspense } from 'react';
 import { formatLocalDateTime, parseServerDate } from '@/lib/date';
 import { apiFetchSafe } from '@/lib/api';
-import {
-  buildFallbackExtraction,
-  createFallbackReportRecord,
-  delay,
-  generateFallbackReportId,
-  getFallbackReports,
-  persistFallbackProcessing,
-  type FallbackReportRecord,
-} from '@/lib/report-fallback';
+import { delay } from '@/lib/report-fallback';
 import { looksLikeSiteReport, readFileAsText } from '@/lib/report-validation';
-import { getDeletedProjectCodes, isProjectDeleted, FALLBACK_PROJECTS } from '@/lib/projects';
+import { getDeletedProjectCodes, isProjectDeleted } from '@/lib/projects';
 import {
   UploadCloud,
   Mic,
@@ -67,7 +59,7 @@ type PipelineStep = {
   progress: number;
 };
 
-type HistoryRow = ReportResponse | FallbackReportRecord;
+type HistoryRow = ReportResponse;
 
 const TERMINAL_STATUSES = new Set(['PROCESSED', 'COMPLETED', 'FAILED', 'REJECTED', 'EVENTS_EXTRACTED']);
 
@@ -116,14 +108,7 @@ function stepBarClass(step: PipelineStep) {
   return 'bg-surface-border';
 }
 
-function mergeHistory(apiReports: ReportResponse[], fallbackReports: FallbackReportRecord[]): HistoryRow[] {
-  const apiIds = new Set(apiReports.map((r) => r.report_id));
-  const merged: HistoryRow[] = [
-    ...fallbackReports.filter((r) => !apiIds.has(r.report_id)),
-    ...apiReports,
-  ];
-  return merged.sort((a, b) => parseServerDate(b.created_at).getTime() - parseServerDate(a.created_at).getTime());
-}
+
 
 function ReportsIngestionHub() {
   const router = useRouter();
@@ -134,26 +119,18 @@ function ReportsIngestionHub() {
   const resolveActiveProject = useCallback(async () => {
     const deleted = getDeletedProjectCodes();
     const res = await apiFetchSafe<{ project_id: string; name: string; description?: string }[]>('/projects');
-    let available: { project_id: string; name: string; displayCode: string }[] = [];
-
-    if (res.ok && Array.isArray(res.data) && res.data.length > 0) {
-      available = res.data
-        .filter((p) => !deleted.has(p.project_id))
-        .map((p) => ({
-          project_id: p.project_id,
-          name: p.name,
-          displayCode: p.project_id === 'PROJ-ALPHA' ? '24P201' : p.project_id,
-        }));
+    if (!res.ok || !Array.isArray(res.data)) {
+      setActiveProject(null);
+      return null;
     }
 
-    if (available.length === 0 && (!res.ok || res.data.length === 0)) {
-      const activeFallbacks = FALLBACK_PROJECTS.filter((p) => !deleted.has(p.code));
-      available = activeFallbacks.map((p) => ({
-        project_id: p.code,
+    const available = res.data
+      .filter((p) => !deleted.has(p.project_id))
+      .map((p) => ({
+        project_id: p.project_id,
         name: p.name,
-        displayCode: p.displayCode,
+        displayCode: p.project_id === 'PROJ-ALPHA' ? '24P201' : p.project_id,
       }));
-    }
 
     if (available.length === 0) {
       setActiveProject(null);
@@ -199,7 +176,6 @@ function ReportsIngestionHub() {
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [isPipelineActive, setIsPipelineActive] = useState(false);
   const [contentWarning, setContentWarning] = useState<string | null>(null);
-  const [usedFallback, setUsedFallback] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [selectedReportDetail, setSelectedReportDetail] = useState<HistoryRow | null>(null);
 
@@ -226,10 +202,12 @@ function ReportsIngestionHub() {
       return;
     }
     const currentId = activeProject.project_id;
-    const fallback = getFallbackReports(currentId);
-    const apiResult = await apiFetchSafe<ReportResponse[]>(`/projects/${currentId}/reports`);
-    const apiReports = apiResult.ok && Array.isArray(apiResult.data) ? apiResult.data : [];
-    setHistory(mergeHistory(apiReports, fallback));
+    const apiResult = await apiFetchSafe<ReportResponse[]>(`/projects/${encodeURIComponent(currentId)}/reports`);
+    if (apiResult.ok && Array.isArray(apiResult.data)) {
+      setHistory(apiResult.data);
+    } else {
+      setHistory([]);
+    }
   }, [activeProject]);
 
   useEffect(() => {
@@ -265,27 +243,15 @@ function ReportsIngestionHub() {
   }, []);
 
   const completePipeline = useCallback(
-    (activeReportId: string, filename: string, fallback: boolean) => {
+    (activeReportId: string, filename: string) => {
       pipelineCompleteRef.current = true;
       stopPolling();
       setIsPipelineActive(false);
-      setUsedFallback(fallback);
 
       updateStep('upload', { status: 'done', progress: 100 });
       updateStep('validate', { status: 'done', progress: 100 });
       updateStep('extract', { status: 'done', progress: 100 });
       updateStep('match', { status: 'done', progress: 100 });
-
-      if (fallback && activeProject && !isProjectDeleted(activeProject.project_id)) {
-        persistFallbackProcessing(activeReportId, filename, activeProject.project_id);
-        setHistory((prev) => {
-          const record = createFallbackReportRecord(activeReportId, filename, activeProject.project_id);
-          return mergeHistory(
-            prev.filter((r): r is ReportResponse => !('isFallback' in r)),
-            [record, ...getFallbackReports(activeProject.project_id)],
-          );
-        });
-      }
 
       setUploadStatus('done');
       notifyAppDataRefresh({ source: 'reports' });
@@ -296,13 +262,13 @@ function ReportsIngestionHub() {
   );
 
   const startStatusPolling = useCallback(
-    (activeReportId: string, filename: string, fallback: boolean) => {
+    (activeReportId: string, filename: string) => {
       stopPolling();
       pollingRef.current = setInterval(async () => {
         if (pipelineCompleteRef.current) return;
         const result = await apiFetchSafe<ReportResponse>(`/reports/${activeReportId}`);
         if (result.ok && isTerminalStatus(result.data.processing_status)) {
-          completePipeline(activeReportId, filename, fallback);
+          completePipeline(activeReportId, filename);
         }
       }, 2000);
     },
@@ -310,10 +276,9 @@ function ReportsIngestionHub() {
   );
 
   const runProcessingPipeline = useCallback(
-    async (activeReportId: string, filename: string, forceFallback: boolean) => {
+    async (activeReportId: string, filename: string) => {
       pipelineCompleteRef.current = false;
       setIsPipelineActive(true);
-      let fallback = forceFallback;
 
       setPipelineSteps([
         { id: 'upload', label: 'Uploading', filename, status: 'done', progress: 100 },
@@ -322,72 +287,61 @@ function ReportsIngestionHub() {
         { id: 'match', label: 'Matching to WBS', status: 'waiting', progress: 0 },
       ]);
 
-      if (!fallback) {
-        startStatusPolling(activeReportId, filename, false);
-      }
+      startStatusPolling(activeReportId, filename);
 
       // --- Extract ---
-      let extraction: ExtractionResultResponse;
-      if (fallback) {
-        await animateStep('extract', 100);
-        extraction = buildFallbackExtraction(activeReportId);
-      } else {
-        await animateStep('extract', 40);
-        const extractResult = await apiFetchSafe<ExtractionResultResponse>(
-          `/reports/${activeReportId}/extract`,
-          { method: 'POST' },
+      await animateStep('extract', 40);
+      const extractResult = await apiFetchSafe<ExtractionResultResponse>(
+        `/reports/${activeReportId}/extract`,
+        { method: 'POST' },
+      );
+
+      if (!extractResult.ok) {
+        stopPolling();
+        setIsPipelineActive(false);
+        setUploadStatus('error');
+        setContentWarning(
+          `Backend extraction failed (${extractResult.error || 'Extraction error'}). The report remains in failed state. Please retry.`,
         );
-        if (!extractResult.ok) {
-          fallback = true;
-          setContentWarning((prev) =>
-            prev ??
-            'Backend extraction failed — processing deterministic demo record (PIP-204-017 / HUMAN_REVIEW).',
-          );
-          await animateStep('extract', 100);
-          extraction = buildFallbackExtraction(activeReportId);
-        } else {
-          extraction = extractResult.data;
-          await animateStep('extract', 100);
-          if (extraction.event_count === 0) {
-            fallback = true;
-            setContentWarning((prev) =>
-              prev ??
-              'No site events extracted from file — applying demo fallback record for pipeline completion.',
-            );
-            extraction = buildFallbackExtraction(activeReportId);
-          }
-        }
+        updateStep('extract', { status: 'waiting', progress: 0 });
+        void fetchHistory();
+        return;
+      }
+
+      const extraction = extractResult.data;
+      await animateStep('extract', 100);
+
+      if (!extraction.events || extraction.events.length === 0) {
+        stopPolling();
+        setIsPipelineActive(false);
+        setUploadStatus('done');
+        setContentWarning('No site events were identified in this report.');
+        updateStep('match', { status: 'done', progress: 100 });
+        void fetchHistory();
+        notifyAppDataRefresh({ source: 'reports' });
+        return;
       }
 
       // --- Match ---
       updateStep('match', { status: 'in_progress', progress: 5 });
-      const events = extraction.events ?? [];
+      const events = extraction.events;
 
-      if (fallback || events.length === 0) {
-        await animateStep('match', 100);
-      } else {
-        for (let i = 0; i < events.length; i++) {
-          const matchRes = await apiFetchSafe<{ decision?: string }>(`/events/${events[i].event_id}/match`, { method: 'POST' });
-          if (matchRes.ok && matchRes.data.decision === 'AUTO_LINK') {
-            await apiFetchSafe(`/events/${events[i].event_id}/apply`, { method: 'POST' });
-          }
-          const progress = Math.max(10, Math.round(((i + 1) / events.length) * 100));
-          updateStep('match', { status: 'in_progress', progress });
-          await delay(200);
+      for (let i = 0; i < events.length; i++) {
+        const matchRes = await apiFetchSafe<{ decision?: string }>(`/events/${events[i].event_id}/match`, { method: 'POST' });
+        if (matchRes.ok && matchRes.data.decision === 'AUTO_LINK') {
+          await apiFetchSafe(`/events/${events[i].event_id}/apply`, { method: 'POST' });
         }
-        await animateStep('match', 100);
-
-        const eventsMatched = events.length;
-        if (eventsMatched === 0) {
-          fallback = true;
-        }
+        const progress = Math.max(10, Math.round(((i + 1) / events.length) * 100));
+        updateStep('match', { status: 'in_progress', progress });
+        await delay(200);
       }
+      await animateStep('match', 100);
 
       if (!pipelineCompleteRef.current) {
-        completePipeline(activeReportId, filename, fallback);
+        completePipeline(activeReportId, filename);
       }
     },
-    [animateStep, updateStep, startStatusPolling, completePipeline],
+    [animateStep, updateStep, startStatusPolling, stopPolling, completePipeline, fetchHistory],
   );
 
   const handleClearFile = (e?: React.MouseEvent) => {
@@ -443,7 +397,6 @@ function ReportsIngestionHub() {
     setUploadStatus('uploading');
     setReportId(null);
     setContentWarning(null);
-    setUsedFallback(false);
     pipelineCompleteRef.current = false;
 
     const currentProj = activeProject || (await resolveActiveProject());
@@ -458,13 +411,15 @@ function ReportsIngestionHub() {
 
     const fileText = await readFileAsText(fileToUpload);
     const validation = looksLikeSiteReport(fileText, fileToUpload.name);
-    let forceFallback = !validation.isValid;
 
     if (!validation.isValid) {
+      setUploadStatus('error');
+      setIsPipelineActive(false);
       setContentWarning(
         validation.reason ??
-          'File does not appear to contain construction site operational updates. A demo fallback record will be processed.',
+          'File does not appear to contain construction site operational updates. Please upload a valid site DPR report.',
       );
+      return;
     }
 
     setPipelineSteps([
@@ -474,17 +429,6 @@ function ReportsIngestionHub() {
       { id: 'match', label: 'Matching to WBS', status: 'waiting', progress: 0 },
     ]);
     setIsPipelineActive(true);
-
-    let activeReportId: string;
-
-    if (forceFallback) {
-      await animateStep('upload', 100);
-      await animateStep('validate', 100);
-      activeReportId = generateFallbackReportId();
-      setReportId(activeReportId);
-      await runProcessingPipeline(activeReportId, fileToUpload.name, true);
-      return;
-    }
 
     const uploadResult = await apiFetchSafe<ReportUploadResponse>('/reports/upload', {
       method: 'POST',
@@ -498,35 +442,19 @@ function ReportsIngestionHub() {
     });
 
     if (!uploadResult.ok) {
-      if (
-        uploadResult.error?.includes('does not exist') ||
-        uploadResult.error?.includes('not found') ||
-        uploadResult.status === 404 ||
-        isProjectDeleted(currentProj.project_id)
-      ) {
-        setUploadStatus('error');
-        setIsPipelineActive(false);
-        setContentWarning(
-          `Upload rejected by server: ${uploadResult.error}. Please create or select an active project in the Projects Directory.`,
-        );
-        return;
-      }
-
-      forceFallback = true;
+      setUploadStatus('error');
+      setIsPipelineActive(false);
       setContentWarning(
-        `Upload rejected by server (${uploadResult.error}). Processing deterministic demo fallback instead.`,
+        `Upload rejected by server: ${uploadResult.error || 'Server error uploading file'}. Please retry.`,
       );
-      await animateStep('upload', 100);
-      await animateStep('validate', 100);
-      activeReportId = generateFallbackReportId();
-    } else {
-      await animateStep('upload', 100);
-      await animateStep('validate', 100);
-      activeReportId = uploadResult.data.report_id;
+      return;
     }
 
+    await animateStep('upload', 100);
+    await animateStep('validate', 100);
+    const activeReportId = uploadResult.data.report_id;
     setReportId(activeReportId);
-    await runProcessingPipeline(activeReportId, fileToUpload.name, forceFallback);
+    await runProcessingPipeline(activeReportId, fileToUpload.name);
   };
 
   const handleUpload = () => {
@@ -747,13 +675,7 @@ function ReportsIngestionHub() {
         </div>
       )}
 
-      {usedFallback && uploadStatus === 'done' && (
-        <div className="mb-6 flex items-center gap-2 rounded-xl border border-status-completed/30 bg-status-completed/10 px-4 py-3 text-[13px] text-status-completed">
-          <CheckCircle2 size={16} />
-          Demo pipeline completed — WBS <span className="font-mono font-bold">PIP-204-017</span> routed to{' '}
-          <span className="font-bold">HUMAN_REVIEW</span>.
-        </div>
-      )}
+
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-6">
@@ -1038,7 +960,6 @@ function ReportsIngestionHub() {
                   ) : (
                     history.map((row) => {
                       const rejected = row.processing_status === 'REJECTED' || row.processing_status === 'FAILED';
-                      const isDemo = 'isFallback' in row && row.isFallback;
                       return (
                         <tr
                           key={row.report_id}
@@ -1052,7 +973,6 @@ function ReportsIngestionHub() {
                             </div>
                             <div className="text-[12px] text-on-surface-variant mt-1 flex items-center gap-1">
                               <span>{formatHistoryDate(row.created_at)}</span>
-                              {isDemo && <span className="text-status-review font-semibold">· Demo fallback</span>}
                             </div>
                           </td>
                           <td className="px-5 py-3">
@@ -1134,7 +1054,9 @@ function ReportsIngestionHub() {
                 <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1">
                   Project
                 </span>
-                <span className="font-bold text-on-surface">Project Alpha (24P201)</span>
+                <span className="font-bold text-on-surface">
+                  {activeProject ? `${activeProject.name} (${activeProject.displayCode})` : 'Active Project'}
+                </span>
               </div>
             </div>
 
@@ -1143,7 +1065,7 @@ function ReportsIngestionHub() {
                 type="button"
                 onClick={() => {
                   setSelectedReportDetail(null);
-                  router.push('/review-queue');
+                  router.push(activeProject ? `/review-queue?project_id=${encodeURIComponent(activeProject.project_id)}` : '/review-queue');
                 }}
                 className="px-4 py-2 bg-surface-container-low hover:bg-surface-container-high border border-surface-border text-[12px] font-bold rounded-lg text-on-surface transition-colors cursor-pointer"
               >
@@ -1153,7 +1075,7 @@ function ReportsIngestionHub() {
                 type="button"
                 onClick={() => {
                   setSelectedReportDetail(null);
-                  router.push('/audit-trail');
+                  router.push(activeProject ? `/audit-trail?project_id=${encodeURIComponent(activeProject.project_id)}` : '/audit-trail');
                 }}
                 className="px-4 py-2 bg-primary text-on-primary text-[12px] font-bold rounded-lg hover:bg-primary/90 transition-colors shadow-sm cursor-pointer"
               >

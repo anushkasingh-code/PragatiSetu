@@ -10,6 +10,8 @@ class ProcessingStatus(str, Enum):
     REJECTED = "REJECTED"
     EVENTS_EXTRACTED = "EVENTS_EXTRACTED"
     PROCESSED = "PROCESSED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
 
 class SourceReport(Base):
     __tablename__ = "source_reports"

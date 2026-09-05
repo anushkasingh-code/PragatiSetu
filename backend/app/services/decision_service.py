@@ -44,6 +44,11 @@ class DecisionService:
         # Idempotency check: Upsert existing decision
         existing_decision = self.db.query(MatchDecision).filter(MatchDecision.event_id == event_id).first()
         if existing_decision:
+            # SAFETY GUARD (BUG-011): CONFLICT_REVIEW is a protected human review state.
+            # Automatic re-evaluation MUST NOT overwrite it; only explicit human action may resolve it.
+            if existing_decision.decision in ("CONFLICT_REVIEW", DecisionEnum.CONFLICT_REVIEW.value):
+                return event, existing_decision
+
             existing_decision.top_activity_id = top_activity_id
             existing_decision.match_confidence = match_confidence
             existing_decision.evidence_completeness = completeness_score
@@ -55,7 +60,7 @@ class DecisionService:
             existing_decision.scoring_policy_version = SCORING_POLICY_VERSION
             decision_record = existing_decision
         else:
-            dec_id = f"DEC-{uuid.uuid4().hex[:8].upper()}"
+            dec_id = f"DEC-{uuid.uuid4().hex[:12].upper()}"
             decision_record = MatchDecision(
                 decision_id=dec_id,
                 event_id=event_id,
