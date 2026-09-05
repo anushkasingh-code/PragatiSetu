@@ -72,20 +72,11 @@ def compute_semantic_similarity(event_text: str, activity: Any) -> float:
             if norm_event > 0 and norm_act > 0:
                 sim = np.dot(event_emb, cached_item) / (norm_event * norm_act)
                 # Map [-1, 1] to [0, 100]
-                score = max(0.0, min(100.0, float((sim + 1.0) / 2.0 * 100.0)))
+                score = max(0.0, min(100.0, (float(sim) + 1.0) / 2.0 * 100.0))
                 return round(score, 2)
         except Exception:
             pass
 
-    # Term-overlap fallback
-    act_text = str(cached_item) if cached_item is not None else f"{activity.discipline} {activity.description}".lower()
-    event_words = set(event_text.lower().split())
-    act_words = set(act_text.lower().split())
-
-    if not event_words or not act_words:
-        return 50.0
-
-    overlap = len(event_words.intersection(act_words))
-    union = len(event_words.union(act_words))
-    jaccard = overlap / union if union > 0 else 0.0
-    return round(float(jaccard * 100.0), 2)
+    # If embedding model is unavailable, return neutral semantic score (50.0).
+    # We do not use fake Jaccard hashes for semantic_score to prevent false high confidence.
+    return 50.0
