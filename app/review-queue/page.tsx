@@ -24,7 +24,6 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { useProjectContext } from '@/lib/project-context';
 import { useCallback, useEffect, useState } from 'react';
 
 type ExtractedEvent = {
@@ -119,8 +118,9 @@ async function fetchPendingReviews(projectId: string): Promise<ReviewItem[]> {
 }
 
 function ReviewQueueContent() {
-  const { selectedProjectId: projectId, projects } = useProjectContext();
-  const currentProject = projects.find(p => p.project_id === projectId);
+  const searchParams = useSearchParams();
+  const rawProjectId = searchParams.get('project_id') ?? 'PROJ-ALPHA';
+  const projectId = rawProjectId === 'PRAGATI-01' || rawProjectId === '24P201' ? 'PROJ-ALPHA' : rawProjectId;
 
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -135,10 +135,6 @@ function ReviewQueueContent() {
   const loadQueue = useCallback(async () => {
     setLoading(true);
     setError(null);
-    if (!projectId) {
-      setLoading(false);
-      return;
-    }
     try {
       const pending = await fetchPendingReviews(projectId);
       setItems(pending);
@@ -242,7 +238,7 @@ function ReviewQueueContent() {
               PragatiSetu Validation
             </span>
             <span className="text-[11px] font-mono text-on-surface-variant bg-surface-container-low px-2 py-0.5 rounded border border-surface-border font-semibold">
-              {currentProject ? `${currentProject.name} (${projectId})` : (projectId || 'No Project')}
+              Project Alpha (24P201)
             </span>
           </div>
           <h2 className="text-[24px] font-semibold text-on-surface">Review Queue</h2>

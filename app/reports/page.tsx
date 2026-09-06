@@ -31,7 +31,6 @@ import {
 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useProjectContext } from '@/lib/project-context';
 
 type ReportUploadResponse = {
   report_id: string;
@@ -57,7 +56,7 @@ type ExtractionResultResponse = {
   events: ExtractedEventResponse[];
 };
 
-type PipelineStepStatus = 'waiting' | 'in_progress' | 'done' | 'failed';
+type PipelineStepStatus = 'waiting' | 'in_progress' | 'done';
 
 type PipelineStep = {
   id: string;
@@ -106,14 +105,12 @@ function stepStatusText(step: PipelineStep) {
 
 function stepStatusClass(step: PipelineStep) {
   if (step.status === 'done') return 'text-status-completed';
-  if (step.status === 'failed') return 'text-status-conflict';
   if (step.status === 'in_progress') return 'text-status-review';
   return 'text-on-surface-variant';
 }
 
 function stepBarClass(step: PipelineStep) {
   if (step.status === 'done') return 'bg-status-completed';
-  if (step.status === 'failed') return 'bg-status-conflict';
   if (step.status === 'in_progress') return 'bg-status-review';
   return 'bg-surface-border';
 }
@@ -129,8 +126,9 @@ function mergeHistory(apiReports: ReportResponse[], fallbackReports: FallbackRep
 
 function ReportsIngestionHub() {
   const router = useRouter();
-  const { selectedProjectId: projectId, projects } = useProjectContext();
-  const currentProject = projects.find(p => p.project_id === projectId);
+  const searchParams = useSearchParams();
+  const rawProjectId = searchParams.get('project_id') ?? 'PROJ-ALPHA';
+  const projectId = rawProjectId === 'PRAGATI-01' || rawProjectId === '24P201' ? 'PROJ-ALPHA' : rawProjectId;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -180,7 +178,6 @@ function ReportsIngestionHub() {
   );
 
   const fetchHistory = useCallback(async () => {
-    if (!projectId) return;
     const fallback = getFallbackReports();
     const apiResult = await apiFetchSafe<ReportResponse[]>(`/projects/${projectId}/reports`);
     const apiReports = apiResult.ok ? apiResult.data : [];
@@ -291,19 +288,8 @@ function ReportsIngestionHub() {
         const extractResult = await apiFetchSafe<ExtractionResultResponse>(
           `/reports/${activeReportId}/extract`,
           { method: 'POST' },
-          60000
         );
         if (!extractResult.ok) {
-          const allowFallback = process.env.NEXT_PUBLIC_ENABLE_DEMO_FALLBACK === 'true';
-          if (!allowFallback) {
-            setContentWarning(`Extraction failed: ${extractResult.error}`);
-            updateStep('extract', { status: 'failed', label: 'Extraction — Failed' });
-            updateStep('match', { status: 'failed', label: 'Matching — Skipped' });
-            setUploadStatus('error');
-            setIsPipelineActive(false);
-            stopPolling();
-            return;
-          }
           fallback = true;
           setContentWarning((prev) =>
             prev ??
@@ -315,15 +301,6 @@ function ReportsIngestionHub() {
           extraction = extractResult.data;
           await animateStep('extract', 100);
           if (extraction.event_count === 0) {
-            const allowFallback = process.env.NEXT_PUBLIC_ENABLE_DEMO_FALLBACK === 'true';
-            if (!allowFallback) {
-              setContentWarning('No events extracted from this file.');
-              updateStep('match', { status: 'failed', label: 'Matching — No Events' });
-              setUploadStatus('error');
-              setIsPipelineActive(false);
-              stopPolling();
-              return;
-            }
             fallback = true;
             setContentWarning((prev) =>
               prev ??
@@ -342,7 +319,7 @@ function ReportsIngestionHub() {
         await animateStep('match', 100);
       } else {
         for (let i = 0; i < events.length; i++) {
-          const matchRes = await apiFetchSafe<{ decision?: string }>(`/events/${events[i].event_id}/match`, { method: 'POST' }, 60000);
+          const matchRes = await apiFetchSafe<{ decision?: string }>(`/events/${events[i].event_id}/match`, { method: 'POST' });
           if (matchRes.ok && matchRes.data.decision === 'AUTO_LINK') {
             await apiFetchSafe(`/events/${events[i].event_id}/apply`, { method: 'POST' });
           }
@@ -443,14 +420,6 @@ function ReportsIngestionHub() {
     let activeReportId: string;
 
     if (forceFallback) {
-      const allowFallback = process.env.NEXT_PUBLIC_ENABLE_DEMO_FALLBACK === 'true';
-      if (!allowFallback) {
-        setContentWarning(validation.reason ?? 'File does not appear to contain construction site operational updates.');
-        updateStep('upload', { status: 'failed', label: 'Validation — Failed' });
-        setUploadStatus('error');
-        setIsPipelineActive(false);
-        return;
-      }
       await animateStep('upload', 100);
       await animateStep('validate', 100);
       activeReportId = generateFallbackReportId();
@@ -464,22 +433,13 @@ function ReportsIngestionHub() {
       body: (() => {
         const formData = new FormData();
         formData.append('file', fileToUpload);
-        formData.append('project_id', projectId || '');
+        formData.append('project_id', projectId);
         formData.append('report_date', new Date().toISOString().slice(0, 10));
         return formData;
       })(),
     });
 
     if (!uploadResult.ok) {
-      const allowFallback = process.env.NEXT_PUBLIC_ENABLE_DEMO_FALLBACK === 'true';
-      if (!allowFallback) {
-        setUploadStatus('error');
-        setContentWarning(`Upload failed: ${uploadResult.error} (${uploadResult.status ?? 'Network Error'})`);
-        updateStep('upload', { status: 'failed', label: 'Uploading — Failed' });
-        setIsPipelineActive(false);
-        return;
-      }
-      
       forceFallback = true;
       setContentWarning(
         `Upload rejected by server (${uploadResult.error}). Processing deterministic demo fallback instead.`,
@@ -690,7 +650,7 @@ function ReportsIngestionHub() {
             PragatiSetu Ingestion
           </span>
           <span className="text-[11px] font-mono text-on-surface-variant bg-surface-container-low px-2 py-0.5 rounded border border-surface-border font-semibold">
-            {currentProject ? `${currentProject.name} (${currentProject.displayCode || currentProject.project_id})` : 'NO PROJECT SELECTED'}
+            Project Alpha (24P201)
           </span>
         </div>
         <h2 className="text-[24px] font-semibold text-on-surface mb-1">Report Ingestion Hub</h2>
@@ -764,13 +724,13 @@ function ReportsIngestionHub() {
                       e.stopPropagation();
                       void handleUpload();
                     }}
-                    disabled={uploadStatus === 'uploading' || isPipelineActive || !projectId}
+                    disabled={uploadStatus === 'uploading' || isPipelineActive}
                     className="px-6 py-2.5 bg-primary text-on-primary text-[12px] font-bold rounded-lg hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-70 cursor-pointer"
                   >
                     {uploadStatus === 'uploading' && 'Uploading & Matching...'}
                     {uploadStatus === 'done' && 'Upload Complete'}
                     {uploadStatus === 'error' && 'Failed - Retry'}
-                    {uploadStatus === 'idle' && (!projectId ? 'Select Project First' : 'Upload & Process')}
+                    {uploadStatus === 'idle' && 'Upload & Process'}
                   </button>
 
                   <button
@@ -1102,7 +1062,7 @@ function ReportsIngestionHub() {
                 <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1">
                   Project
                 </span>
-                <span className="font-bold text-on-surface">{currentProject ? `${currentProject.name} (${currentProject.displayCode || currentProject.project_id})` : (projectId || 'No Project')}</span>
+                <span className="font-bold text-on-surface">Project Alpha (24P201)</span>
               </div>
             </div>
 

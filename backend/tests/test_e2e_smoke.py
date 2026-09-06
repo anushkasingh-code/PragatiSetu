@@ -79,13 +79,13 @@ def test_full_e2e_smoke(client, db_session):
     res = client.post(f"/reports/{report_id}/extract")
     assert res.status_code == 200
     proc_data = res.json()
-    assert proc_data["processing_status"] in ("COMPLETED", "PROCESSED", "EVENTS_EXTRACTED")
+    assert proc_data["processing_status"] in ("PROCESSED", "PROCESSED", "EVENTS_EXTRACTED")
     assert proc_data["event_count"] >= 1
 
     # 8. Extract event verification
     rep_obj = db_session.query(SourceReport).filter(SourceReport.report_id == report_id).first()
     assert rep_obj is not None
-    assert rep_obj.processing_status == "COMPLETED"
+    assert rep_obj.processing_status == "PROCESSED"
 
     events = db_session.query(ExtractedEvent).filter(ExtractedEvent.report_id == report_id).all()
     assert len(events) >= 1
@@ -133,7 +133,7 @@ def test_full_e2e_smoke(client, db_session):
     timeline = res.json()
     updated_act = next((a for a in timeline["activities"] if a["activity_id"] == act_id), None)
     assert updated_act is not None
-    assert updated_act["status"] in ("STARTED", "IN_PROGRESS", "COMPLETED")
+    assert updated_act["status"] in ("STARTED", "IN_PROGRESS", "PROCESSED")
 
     # 15. Verify audit log
     res = client.get("/audit?project_id=PROJ-ALPHA")

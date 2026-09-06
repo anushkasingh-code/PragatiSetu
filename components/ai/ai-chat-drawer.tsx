@@ -25,7 +25,6 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { apiFetchSafe } from '@/lib/api';
-import { useProjectContext } from '@/lib/project-context';
 
 interface ChatActivityItem {
   activity_id: string;
@@ -47,7 +46,12 @@ interface ChatMessage {
   model?: string;
 }
 
-// Removed hardcoded QUICK_PROMPTS array
+const QUICK_PROMPTS = [
+  '📊 Overall progress of Project Alpha?',
+  '🔍 Find pipeline welding & spool activities',
+  '⚠️ Are there any schedule conflicts or delays?',
+  '🎙️ How do I log daily voice progress updates?',
+];
 
 // Helper to format simple markdown elements (bold, italic, code, headers, links, lists)
 function renderFormattedText(text: string) {
@@ -178,15 +182,7 @@ function renderInlineStyles(text: string): React.ReactNode {
 export function AiChatDrawer() {
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-  const { selectedProjectId, setSelectedProjectId, projects } = useProjectContext();
-  const currentProject = projects.find((p) => p.project_id === selectedProjectId);
-
-  const quickPrompts = [
-    `📊 Overall progress of ${currentProject ? currentProject.name : 'the project'}?`,
-    '🔍 Find pipeline welding & spool activities',
-    '⚠️ Are there any schedule conflicts or delays?',
-    '🎙️ How do I log daily voice progress updates?',
-  ];
+  const [selectedProjectId, setSelectedProjectId] = useState('PROJ-ALPHA');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -368,7 +364,7 @@ export function AiChatDrawer() {
           top_k: 4,
           api_key: storedKey || undefined,
         }),
-      }, 30000);
+      });
 
       if (res.ok && res.data) {
         setEngineSource(res.data.source === 'groq' ? 'groq' : 'local_rag');
@@ -419,14 +415,14 @@ export function AiChatDrawer() {
             setTimeout(() => inputRef.current?.focus(), 200);
           }}
           className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 bg-primary text-on-primary rounded-full shadow-xl hover:shadow-2xl hover:scale-105 transition-all duration-200 cursor-pointer group border border-primary/30"
-          title="Open PragatiSetu AI Copilot"
+          title="Open PragatiSetu AI Assistant"
         >
           <div className="relative flex items-center justify-center">
             <Bot size={20} className="group-hover:rotate-12 transition-transform duration-300" />
             <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-primary animate-pulse"></span>
           </div>
           <span className="text-[13px] font-bold tracking-wide hidden sm:inline-block">
-            AI Copilot
+            AI Assistant
           </span>
         </button>
       )}
@@ -489,17 +485,13 @@ export function AiChatDrawer() {
 
               {/* Project Picker */}
               <select
-                value={selectedProjectId || ''}
+                value={selectedProjectId}
                 onChange={(e) => setSelectedProjectId(e.target.value)}
-                className="text-[11px] font-bold bg-surface-container border border-surface-border rounded-md px-2 py-1 text-on-surface focus:outline-none cursor-pointer max-w-[120px] text-ellipsis"
+                className="text-[11px] font-bold bg-surface-container border border-surface-border rounded-md px-2 py-1 text-on-surface focus:outline-none cursor-pointer"
                 title="Active Project Context"
               >
-                {!selectedProjectId && <option value="" disabled>No Project</option>}
-                {projects.map(p => (
-                  <option key={p.project_id} value={p.project_id}>
-                    {p.name} ({p.project_id})
-                  </option>
-                ))}
+                <option value="PROJ-ALPHA">Project Alpha (24P201)</option>
+                <option value="PROJ-BETA">Project Beta</option>
               </select>
 
               {/* Clear */}
@@ -529,7 +521,7 @@ export function AiChatDrawer() {
                 type="button"
                 onClick={() => setIsOpen(false)}
                 className="p-1.5 text-on-surface-variant hover:text-on-surface rounded-lg hover:bg-surface-container transition-colors cursor-pointer"
-                title="Close AI Copilot"
+                title="Close AI Assistant"
               >
                 <X size={18} />
               </button>
@@ -600,19 +592,7 @@ export function AiChatDrawer() {
 
           {/* Conversation Feed */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-surface">
-            {!selectedProjectId ? (
-              <div className="h-full flex flex-col justify-center items-center text-center px-4 py-8 max-w-sm mx-auto">
-                <div className="w-12 h-12 rounded-2xl bg-surface-container-high text-on-surface-variant flex items-center justify-center mb-3">
-                  <Bot size={24} />
-                </div>
-                <h4 className="text-[16px] font-bold text-on-surface mb-1">
-                  No Project Selected
-                </h4>
-                <p className="text-[12px] text-on-surface-variant leading-relaxed">
-                  Please select a project to ask project-specific questions and analyze schedules.
-                </p>
-              </div>
-            ) : messages.length === 0 ? (
+            {messages.length === 0 ? (
               <div className="h-full flex flex-col justify-center items-center text-center px-4 py-8 max-w-sm mx-auto">
                 <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-3">
                   <Bot size={24} />
@@ -629,7 +609,7 @@ export function AiChatDrawer() {
                   <p className="text-[10px] font-bold uppercase tracking-wider text-outline mb-1 px-1">
                     Suggested Queries
                   </p>
-                  {quickPrompts.map((prompt, i) => (
+                  {QUICK_PROMPTS.map((prompt, i) => (
                     <button
                       key={i}
                       type="button"
@@ -755,8 +735,8 @@ export function AiChatDrawer() {
                       ? 'Listening to voice input...'
                       : 'Ask PragatiSetu AI anything (e.g. status, delays, piping)...'
                   }
-                  disabled={isLoading || !selectedProjectId}
-                  className="w-full px-3.5 py-2.5 pr-10 text-[13px] rounded-xl bg-surface border border-surface-border text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all disabled:opacity-50"
+                  disabled={isLoading}
+                  className="w-full px-3.5 py-2.5 pr-10 text-[13px] rounded-xl bg-surface border border-surface-border text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all"
                 />
 
                 {/* Voice Input Button */}
@@ -778,7 +758,7 @@ export function AiChatDrawer() {
 
               <button
                 type="submit"
-                disabled={!inputValue.trim() || isLoading || !selectedProjectId}
+                disabled={!inputValue.trim() || isLoading}
                 className="p-2.5 rounded-xl bg-primary text-on-primary hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer shadow-xs"
                 title="Send Message"
               >

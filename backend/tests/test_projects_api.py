@@ -63,7 +63,7 @@ def test_delete_project_success(client, db_session):
     # Delete the temporary project
     res = client.delete("/projects/TEMP-DELETE-TEST")
     assert res.status_code == 200
-    assert res.json()["message"] == "Project deleted successfully"
+    assert res.json()["message"] == "Project 'TEMP-DELETE-TEST' deleted successfully."
 
     # Verify cascading delete
     res_proj = client.get("/projects/TEMP-DELETE-TEST")

@@ -4,7 +4,6 @@ import { Suspense } from 'react';
 import { apiFetch, apiFetchSafe } from '@/lib/api';
 import { useAppDataRefresh } from '@/lib/app-sync';
 import { getFallbackMetrics, getPendingFallbackReviews } from '@/lib/report-fallback';
-import { useProjectContext } from '@/lib/project-context';
 import { Eye, ArrowRight, Activity, Clock, Layers } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
@@ -49,9 +48,10 @@ function formatMetric(value: number | null, suffix = '') {
 }
 
 function DashboardContent() {
-  const { selectedProjectId: projectId, projects } = useProjectContext();
-  const currentProject = projects.find(p => p.project_id === projectId);
+  const searchParams = useSearchParams();
   const pathname = usePathname();
+  const rawProjectId = searchParams.get('project_id') ?? 'PROJ-ALPHA';
+  const projectId = rawProjectId === 'PRAGATI-01' || rawProjectId === '24P201' ? 'PROJ-ALPHA' : rawProjectId;
 
   const [overallProgress, setOverallProgress] = useState<number | null>(null);
   const [aiAccuracy, setAiAccuracy] = useState<number | null>(null);
@@ -76,8 +76,6 @@ function DashboardContent() {
   const loadDashboard = useCallback(() => {
     const fallbackMetrics = getFallbackMetrics();
     const pendingFallback = getPendingFallbackReviews().length;
-
-    if (!projectId) return;
 
     // Fetch real reports for Recent Field Ingestions
     apiFetchSafe<any[]>(`/projects/${projectId}/reports`).then((res) => {
@@ -184,14 +182,16 @@ function DashboardContent() {
               PragatiSetu Infrastructure Dashboard
             </span>
             <span className="text-[11px] font-mono text-on-surface-variant bg-surface-container-low px-2 py-0.5 rounded border border-surface-border font-semibold">
-              {projectId || 'NO PROJECT'}
+              {projectId === 'PROJ-BETA' ? 'PROJ-BETA' : '24P201'}
             </span>
           </div>
           <h1 className="text-[24px] font-bold text-on-surface leading-tight">
-            {currentProject?.name || (projectId ? projectId : 'No Project Selected')}
+            {projectId === 'PROJ-BETA' ? 'Project Beta' : 'Project Alpha'}
           </h1>
           <p className="text-[13px] text-on-surface-variant">
-            PragatiSetu Infrastructure Dashboard
+            {projectId === 'PROJ-BETA'
+              ? 'Compressor Station & High-Pressure Utility Upgrade'
+              : 'Pump, Pipeline & Utility Expansion — Sector 4 Pipeline'}
           </p>
         </div>
 
@@ -203,7 +203,7 @@ function DashboardContent() {
             Switch Project
           </Link>
           <Link
-            href={`/schedule?project_id=${encodeURIComponent(projectId || '')}`}
+            href={`/schedule?project_id=${encodeURIComponent(projectId)}`}
             className="px-3 py-1.5 bg-primary text-on-primary text-[12px] font-bold rounded-lg hover:bg-primary/90 transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
           >
             Live Schedule
@@ -218,7 +218,7 @@ function DashboardContent() {
           <div>
             <div className="flex items-center justify-between mb-2">
               <p className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">Overall Progress</p>
-              <Link href={`/schedule?project_id=${encodeURIComponent(projectId || '')}`} className="text-[11px] font-bold text-primary hover:underline">
+              <Link href={`/schedule?project_id=${encodeURIComponent(projectId)}`} className="text-[11px] font-bold text-primary hover:underline">
                 View Schedule →
               </Link>
             </div>

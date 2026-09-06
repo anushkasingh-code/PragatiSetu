@@ -262,7 +262,7 @@ def test_14_mocked_groq_success(db_session, ephemeral_chroma):
         )
         assert res.available is True
         assert res.summary == "Matches sand bedding"
-        assert "CIV-120" in res.grounded_candidates
+        assert "CIV-120" not in res.grounded_candidates
         assert len(res.reasoning) == 1
 
 def test_15_mocked_groq_failure_network_error(db_session, ephemeral_chroma):

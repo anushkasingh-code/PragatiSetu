@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiFetchSafe } from '@/lib/api';
 import { useAppDataRefresh, notifyAppDataRefresh } from '@/lib/app-sync';
-import { useProjectContext } from '@/lib/project-context';
 import { parseServerDate } from '@/lib/date';
 import {
   Search,
@@ -139,8 +138,6 @@ const INITIAL_AUDIT_DATA: AuditRecord[] = [
 ];
 
 export default function AuditTrail() {
-  const { selectedProjectId: projectId, projects } = useProjectContext();
-  const currentProject = projects.find(p => p.project_id === projectId);
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState<'7d' | '30d' | 'all'>('7d');
   const [decisionFilter, setDecisionFilter] = useState<'all' | 'AUTO_LINK' | 'OVERRIDE' | 'VERIFIED'>('all');
@@ -157,8 +154,7 @@ export default function AuditTrail() {
     if (!auditRes.ok || !Array.isArray(auditRes.data)) return;
 
     // 2. Fetch activities metadata for descriptions & WBS codes
-    if (!projectId) return;
-    const actRes = await apiFetchSafe<any[]>(`/projects/${projectId}/activities`);
+    const actRes = await apiFetchSafe<any[]>('/projects/PROJ-ALPHA/activities');
     const actMap = new Map<string, { desc: string; wbs: string }>();
     if (actRes.ok && Array.isArray(actRes.data)) {
       actRes.data.forEach((a) => {
@@ -217,7 +213,7 @@ export default function AuditTrail() {
     const liveIds = new Set(liveMapped.map((r) => r.id));
     const merged = [...liveMapped, ...INITIAL_AUDIT_DATA.filter((r) => !liveIds.has(r.id))];
     setLiveAuditData(merged);
-  }, [projectId]);
+  }, []);
 
   useEffect(() => {
     void fetchAuditTrail();
@@ -308,7 +304,7 @@ export default function AuditTrail() {
               PragatiSetu Compliance
             </span>
             <span className="text-[11px] font-mono text-on-surface-variant bg-surface-container-low px-2 py-0.5 rounded border border-surface-border font-semibold">
-              {currentProject ? `${currentProject.name} (${projectId})` : (projectId || 'No Project')}
+              Project Alpha (24P201)
             </span>
           </div>
           <h2 className="text-[28px] font-bold text-on-surface leading-tight">Audit &amp; Compliance Trail</h2>

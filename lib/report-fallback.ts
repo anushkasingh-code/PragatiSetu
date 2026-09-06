@@ -23,3 +23,47 @@ export function clearFallbackData(projectId?: string) {
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+// -------------------------------------------------------------
+// MOCK EXPORTS TO SATISFY UI DEPENDENCIES WITHOUT REAL FALLBACKS
+// -------------------------------------------------------------
+export const FALLBACK_WBS_CODE = 'MOCK-WBS';
+
+export function getFallbackMetrics() {
+  return { eventsProcessed: 0, autoMatched: 0, accuracy: 0, eventsDelta: 0 };
+}
+
+export function getPendingFallbackReviews(): any[] {
+  return [];
+}
+
+export function getFallbackReports(): any[] {
+  return [];
+}
+
+export function persistFallbackProcessing(reportId: string, payload: any) {}
+
+export function createFallbackReportRecord(reportId: string, filename: string): any {
+  return {
+    report_id: reportId,
+    filename: filename,
+    project_id: 'PROJ-ALPHA',
+    processing_status: 'UPLOADED'
+  };
+}
+
+export function buildFallbackExtraction(reportId: string): any {
+  return {
+    processing_status: 'EVENTS_EXTRACTED',
+    event_count: 0
+  };
+}
+
+export function generateFallbackReportId(): string {
+  return `REP-MOCK-${Date.now()}`;
+}
+
+export function resolveFallbackReview(eventId: string, decision?: string, activityId?: string) {}
+
+export type FallbackReportRecord = any;
+export type FallbackReviewRecord = any;
