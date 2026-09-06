@@ -153,6 +153,28 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
     db.commit()
     return {"message": f"Project '{project_id}' deleted successfully.", "project_id": project_id}
 
+@router.delete("/projects/{project_id}", status_code=status.HTTP_200_OK)
+def delete_project(project_id: str, db: Session = Depends(get_db)):
+    """Delete a project and cascade delete all its records."""
+    project = db.query(Project).filter(Project.project_id == project_id).first()
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project with ID '{project_id}' not found."
+        )
+    
+    db.delete(project)
+    db.commit()
+
+    try:
+        from backend.app.services.ai.vector_store import get_activity_collection
+        collection = get_activity_collection()
+        collection.delete(where={"project_id": project_id})
+    except Exception:
+        pass
+
+    return {"message": "Project deleted successfully", "project_id": project_id}
+
 @router.post("/projects/{project_id}/schedule/upload", status_code=status.HTTP_200_OK)
 async def upload_baseline_schedule(project_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
     """

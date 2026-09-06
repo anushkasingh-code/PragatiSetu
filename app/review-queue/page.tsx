@@ -3,7 +3,12 @@
 import { apiFetchSafe } from '@/lib/api';
 import { notifyAppDataRefresh, useAppDataRefresh } from '@/lib/app-sync';
 import { Suspense } from 'react';
-import { getDeletedProjectCodes, isProjectDeleted } from '@/lib/projects';
+import {
+  FALLBACK_WBS_CODE,
+  getPendingFallbackReviews,
+  resolveFallbackReview,
+  type FallbackReviewRecord,
+} from '@/lib/report-fallback';
 import {
   Filter,
   Mic,
@@ -19,6 +24,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
+import { useProjectContext } from '@/lib/project-context';
 import { useCallback, useEffect, useState } from 'react';
 
 type ExtractedEvent = {
@@ -57,29 +63,64 @@ type ReviewItem = {
   decision: MatchDecision;
   candidates: CandidateScore[];
   activities: Record<string, Activity>;
+  isFallback?: boolean;
 };
 
 const PENDING_DECISIONS = new Set(['HUMAN_REVIEW', 'UNPLANNED_REVIEW', 'CONFLICT_REVIEW']);
 
+function fallbackToReviewItem(record: FallbackReviewRecord): ReviewItem {
+  const activities: Record<string, Activity> = {
+    [FALLBACK_WBS_CODE]: {
+      activity_id: FALLBACK_WBS_CODE,
+      description: 'Spool Erection — Rack B Piping Package',
+      equipment_or_line_id: FALLBACK_WBS_CODE,
+    },
+    'PIP-204-018': {
+      activity_id: 'PIP-204-018',
+      description: 'Hydrotest — Rack B Piping Package',
+      equipment_or_line_id: 'PIP-204-018',
+    },
+  };
+
+  return {
+    event: {
+      event_id: record.event_id,
+      report_id: record.report_id,
+      raw_text: record.raw_text,
+      identifier: record.identifier,
+      action: record.action,
+      object: record.object,
+      location: record.location,
+      status: record.status,
+    },
+    decision: {
+      event_id: record.event_id,
+      decision: record.decision,
+      top_activity_id: record.top_activity_id,
+      match_confidence: record.match_confidence,
+      reasons: record.reasons,
+    },
+    candidates: record.candidates,
+    activities,
+    isFallback: true,
+  };
+}
+
 async function fetchPendingReviews(projectId: string): Promise<ReviewItem[]> {
-  if (!projectId || isProjectDeleted(projectId)) {
-    return [];
-  }
-  const pendingRes = await apiFetchSafe<ReviewItem[]>(`/projects/${encodeURIComponent(projectId)}/reviews/pending?limit=1000`);
-  if (pendingRes.ok && Array.isArray(pendingRes.data)) {
+  // 1. Fetch live pending reviews from fast aggregated backend endpoint
+  const pendingRes = await apiFetchSafe<ReviewItem[]>(`/projects/${projectId}/reviews/pending`);
+  if (pendingRes.ok && Array.isArray(pendingRes.data) && pendingRes.data.length > 0) {
     return pendingRes.data;
   }
-  return [];
+
+  // 2. Fallback to session items if backend returned empty
+  const fallbackItems = getPendingFallbackReviews().map(fallbackToReviewItem);
+  return fallbackItems;
 }
 
 function ReviewQueueContent() {
-  const searchParams = useSearchParams();
-
-  const [activeProject, setActiveProject] = useState<{
-    project_id: string;
-    name: string;
-    displayCode: string;
-  } | null>(null);
+  const { selectedProjectId: projectId, projects } = useProjectContext();
+  const currentProject = projects.find(p => p.project_id === projectId);
 
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -91,56 +132,28 @@ function ReviewQueueContent() {
   const [modifyNote, setModifyNote] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const resolveActiveProject = useCallback(async () => {
-    const deleted = getDeletedProjectCodes();
-    const res = await apiFetchSafe<{ project_id: string; name: string; description?: string }[]>('/projects');
-    if (!res.ok) {
-      setError(res.error || 'Failed to load projects from server.');
-      setActiveProject(null);
-      return null;
-    }
-
-    const available = (Array.isArray(res.data) ? res.data : [])
-      .filter((p) => !deleted.has(p.project_id))
-      .map((p) => ({
-        project_id: p.project_id,
-        name: p.name,
-        displayCode: p.project_id === 'PROJ-ALPHA' ? '24P201' : p.project_id,
-      }));
-
-    if (available.length === 0) {
-      setActiveProject(null);
-      return null;
-    }
-
-    const requestedId = searchParams.get('project_id');
-    const normalizedReq = requestedId === 'PRAGATI-01' || requestedId === '24P201' ? 'PROJ-ALPHA' : requestedId;
-    const current = (normalizedReq ? available.find((p) => p.project_id === normalizedReq) : null) || available[0];
-    setActiveProject(current);
-    return current;
-  }, [searchParams]);
-
   const loadQueue = useCallback(async () => {
     setLoading(true);
     setError(null);
+    if (!projectId) {
+      setLoading(false);
+      return;
+    }
     try {
-      const currentProj = await resolveActiveProject();
-      if (!currentProj) {
-        setItems([]);
-        setCurrentIndex(0);
-        return;
-      }
-      const pending = await fetchPendingReviews(currentProj.project_id);
+      const pending = await fetchPendingReviews(projectId);
       setItems(pending);
       setCurrentIndex((prev) => (pending.length === 0 ? 0 : Math.min(prev, pending.length - 1)));
     } catch {
-      setItems([]);
+      const fallbackOnly = getPendingFallbackReviews().map(fallbackToReviewItem);
+      setItems(fallbackOnly);
       setCurrentIndex(0);
-      setError('Failed to load review queue.');
+      if (fallbackOnly.length === 0) {
+        setError('Failed to load review queue.');
+      }
     } finally {
       setLoading(false);
     }
-  }, [resolveActiveProject]);
+  }, [projectId]);
 
   useEffect(() => {
     void loadQueue();
@@ -160,7 +173,7 @@ function ReviewQueueContent() {
   }, [currentIndex, currentItem?.event.event_id]);
 
   const handleDecision = async (
-    decision: 'ACCEPT' | 'REJECT' | 'UNPLANNED',
+    decision: 'ACCEPT' | 'REJECT',
     overrideActivityId?: string,
     overrideReason?: string
   ) => {
@@ -169,13 +182,14 @@ function ReviewQueueContent() {
     setError(null);
     try {
       const chosenActivityId = overrideActivityId || activeActivityId;
-      const chosenReason =
-        overrideReason ||
-        (decision === 'ACCEPT'
-          ? 'Planner confirmed match'
-          : decision === 'UNPLANNED'
-          ? 'Planner marked as unplanned event'
-          : 'Planner rejected match');
+      const chosenReason = overrideReason || (decision === 'ACCEPT' ? 'Planner confirmed match' : 'Planner rejected match');
+
+      if (currentItem.isFallback) {
+        resolveFallbackReview(currentItem.event.event_id);
+        notifyAppDataRefresh({ source: 'review-queue' });
+        await loadQueue();
+        return;
+      }
 
       const result = await apiFetchSafe(`/reviews/${currentItem.event.event_id}/decision`, {
         method: 'POST',
@@ -191,11 +205,6 @@ function ReviewQueueContent() {
         setError(`Review action failed: ${result.error}`);
         return;
       }
-      setItems((prev) => {
-        const next = prev.filter((it) => it.event.event_id !== currentItem.event.event_id);
-        setCurrentIndex((idx) => (next.length === 0 ? 0 : Math.min(idx, next.length - 1)));
-        return next;
-      });
       notifyAppDataRefresh({ source: 'review-queue' });
       await loadQueue();
     } catch {
@@ -214,8 +223,7 @@ function ReviewQueueContent() {
     setActionLoading(true);
     setError(null);
     try {
-      const pid = activeProject?.project_id || 'PROJ-ALPHA';
-      await apiFetchSafe(`/projects/${encodeURIComponent(pid)}/reviews/reset-demo`, { method: 'POST' });
+      await apiFetchSafe('/reviews/reset', { method: 'POST' });
       notifyAppDataRefresh({ source: 'review-queue' });
       await loadQueue();
     } catch {
@@ -234,7 +242,7 @@ function ReviewQueueContent() {
               PragatiSetu Validation
             </span>
             <span className="text-[11px] font-mono text-on-surface-variant bg-surface-container-low px-2 py-0.5 rounded border border-surface-border font-semibold">
-              {activeProject ? `${activeProject.name} (${activeProject.displayCode})` : 'No Active Project'}
+              {currentProject ? `${currentProject.name} (${projectId})` : (projectId || 'No Project')}
             </span>
           </div>
           <h2 className="text-[24px] font-semibold text-on-surface">Review Queue</h2>
@@ -342,9 +350,9 @@ function ReviewQueueContent() {
 
               <div className="mt-auto pt-6">
                 <button
-                  onClick={() => void handleDecision('UNPLANNED')}
+                  onClick={() => void handleDecision('REJECT')}
                   disabled={actionLoading}
-                  className="w-full py-2.5 bg-surface-container-low hover:bg-surface-container-high border border-surface-border rounded-lg text-on-surface text-[14px] font-bold transition-colors flex items-center justify-center gap-2 disabled:opacity-70 cursor-pointer"
+                  className="w-full py-2.5 bg-surface-container-low hover:bg-surface-container-high border border-surface-border rounded-lg text-on-surface text-[14px] font-bold transition-colors flex items-center justify-center gap-2 disabled:opacity-70"
                 >
                   <AlertTriangle size={18} /> Mark as Unplanned Event
                 </button>

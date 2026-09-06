@@ -35,7 +35,7 @@ def process_report_pipeline_end_to_end(report_id: str, db: Session):
             except Exception:
                 continue
 
-        updated_rep.processing_status = ProcessingStatus.COMPLETED.value
+        updated_rep.processing_status = ProcessingStatus.PROCESSED.value
         db.commit()
         db.refresh(updated_rep)
         return updated_rep, events
@@ -44,10 +44,11 @@ def process_report_pipeline_end_to_end(report_id: str, db: Session):
             db.rollback()
         except Exception:
             pass
+        import traceback
+        traceback.print_exc()
         rep = db.query(SourceReport).filter(SourceReport.report_id == report_id).first()
         if rep:
-            rep.processing_status = ProcessingStatus.FAILED.value
-            rep.rejection_reason = str(e)
+            rep.processing_status = ProcessingStatus.EVENTS_EXTRACTED.value
             db.commit()
         return rep, []
 

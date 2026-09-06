@@ -17,10 +17,10 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useEffect, useState, useCallback } from 'react';
-import { useAppDataRefresh } from '@/lib/app-sync';
-import { Suspense } from 'react';
+import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useProjectContext } from '@/lib/project-context';
+import { useAppDataRefresh } from '@/lib/app-sync';
 import Link from 'next/link';
 
 type GanttStyle = 'phase' | 'completed' | 'completed-thin' | 'in-progress' | 'not-started';
@@ -184,8 +184,8 @@ function statusBadgeClass(statusLabel: ScheduleRow['statusLabel']) {
 
 function ScheduleContent() {
   const searchParams = useSearchParams();
-  const rawProjectId = searchParams.get('project_id') ?? 'PROJ-ALPHA';
-  const projectId = rawProjectId === 'PRAGATI-01' || rawProjectId === '24P201' ? 'PROJ-ALPHA' : rawProjectId;
+  const { selectedProjectId: projectId, projects } = useProjectContext();
+  const currentProject = projects.find(p => p.project_id === projectId);
 
   const [rows, setRows] = useState<ScheduleRow[]>([]);
   const [periods, setPeriods] = useState<TimelinePeriod[]>(FALLBACK_PERIODS);
@@ -204,6 +204,7 @@ function ScheduleContent() {
   }, [urlSearch]);
 
   const loadTimeline = useCallback(() => {
+    if (!projectId) return;
     apiFetch<TimelineResponse>(`/projects/${projectId}/timeline`)
       .then((data) => {
         const mapped = mapApiToRows(data);
@@ -218,8 +219,8 @@ function ScheduleContent() {
         apiFetchSafe<any[]>(`/projects/${projectId}/activities`).then((res) => {
           if (res.ok && Array.isArray(res.data) && res.data.length > 0) {
             const mapped = mapApiToRows({
-              project_id: projectId,
-              project_name: projectId === 'PROJ-BETA' ? 'Project Beta' : 'Project Alpha',
+              project_id: projectId || '',
+              project_name: currentProject?.name || projectId || '',
               total_activities: res.data.length,
               activities: res.data,
             });
@@ -231,7 +232,7 @@ function ScheduleContent() {
           }
         });
       });
-  }, [projectId]);
+  }, [projectId, currentProject]);
 
   useEffect(() => {
     loadTimeline();
@@ -434,7 +435,7 @@ function ScheduleContent() {
 
         <div className="flex items-center gap-4">
           <span className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 bg-surface-container-low border border-surface-border rounded text-[11px] font-bold text-on-surface">
-            {projectId === 'PROJ-BETA' ? 'Project Beta' : 'Project Alpha (24P201)'}
+            {currentProject ? `${currentProject.name} (${projectId})` : (projectId || 'No Project')}
           </span>
           <div className="flex items-center gap-5 text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">
             <div className="flex items-center gap-2">

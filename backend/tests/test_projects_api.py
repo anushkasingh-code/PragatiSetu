@@ -49,3 +49,29 @@ def test_api_projects_and_activities(client, db_session):
     # 7. GET /activities/NONEXISTENT -> 404
     res_404_act = client.get("/activities/NONEXISTENT_ACT")
     assert res_404_act.status_code == 404
+
+def test_delete_project_success(client, db_session):
+    # Create a temporary project to delete
+    res_create = client.post("/projects", json={
+        "project_id": "TEMP-DELETE-TEST",
+        "name": "Temporary Delete Test Project",
+        "description": "A temp project for delete testing",
+        "status": "Planning"
+    })
+    assert res_create.status_code == 201
+    
+    # Delete the temporary project
+    res = client.delete("/projects/TEMP-DELETE-TEST")
+    assert res.status_code == 200
+    assert res.json()["message"] == "Project deleted successfully"
+
+    # Verify cascading delete
+    res_proj = client.get("/projects/TEMP-DELETE-TEST")
+    assert res_proj.status_code == 404
+
+    res_acts = client.get("/projects/TEMP-DELETE-TEST/activities")
+    assert res_acts.status_code == 404
+
+def test_delete_project_not_found(client):
+    res = client.delete("/projects/NONEXISTENT_PROJ")
+    assert res.status_code == 404

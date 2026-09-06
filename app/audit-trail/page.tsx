@@ -1,11 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import React, { useState, useEffect, useCallback } from 'react';
 import { apiFetchSafe } from '@/lib/api';
 import { useAppDataRefresh, notifyAppDataRefresh } from '@/lib/app-sync';
+import { useProjectContext } from '@/lib/project-context';
 import { parseServerDate } from '@/lib/date';
-import { getDeletedProjectCodes } from '@/lib/projects';
 import {
   Search,
   Calendar,
@@ -14,6 +13,7 @@ import {
   History,
   Trash2,
   PersonStanding,
+  RotateCw,
   Check,
   X,
   FileCheck,
@@ -40,15 +40,107 @@ interface AuditRecord {
   newStart: string;
 }
 
-function AuditTrailContent() {
-  const searchParams = useSearchParams();
+const INITIAL_AUDIT_DATA: AuditRecord[] = [
+  {
+    id: 'aud-001',
+    type: 'AUTO_LINK',
+    time: '09:42 AM',
+    daysAgo: 1,
+    description: 'System automatically linked field voice DPR transcript to schedule activity.',
+    confidence: 94,
+    user: 'System (AI)',
+    hash: 'a7f9b2c4',
+    activityCode: '24P201',
+    activityName: 'Pour Foundation Slab',
+    wbs: 'L6-CIV-04',
+    prevStatus: 'NOT_STARTED',
+    prevPercent: 0,
+    prevStart: '--/--/----',
+    newStatus: 'IN_PROGRESS',
+    newPercent: 45,
+    newStart: '05/09/2026',
+  },
+  {
+    id: 'aud-002',
+    type: 'OVERRIDE',
+    time: '11:15 AM',
+    daysAgo: 2,
+    description: 'Site Supervisor Ramesh Sharma adjusted progress percentage after rebar QA sign-off.',
+    confidence: 88,
+    user: 'Ramesh Sharma (Supervisor)',
+    hash: 'e8d1c93a',
+    activityCode: '24P202',
+    activityName: 'Install Pump Manifold Flanges',
+    wbs: 'L6-PIP-02',
+    prevStatus: 'IN_PROGRESS',
+    prevPercent: 60,
+    prevStart: '01/09/2026',
+    newStatus: 'COMPLETED',
+    newPercent: 100,
+    newStart: '01/09/2026',
+  },
+  {
+    id: 'aud-003',
+    type: 'VERIFIED',
+    time: '03:30 PM',
+    daysAgo: 4,
+    description: 'Human planner J. Miller confirmed activity linking from contractor PDF report.',
+    confidence: 76,
+    user: 'J. Miller (Planner)',
+    hash: '3b4fa910',
+    activityCode: '24P205',
+    activityName: 'Hydrostatic Pipeline Pressure Test',
+    wbs: 'L6-QA-01',
+    prevStatus: 'NOT_STARTED',
+    prevPercent: 0,
+    prevStart: '--/--/----',
+    newStatus: 'IN_PROGRESS',
+    newPercent: 85,
+    newStart: '03/09/2026',
+  },
+  {
+    id: 'aud-004',
+    type: 'AUTO_LINK',
+    time: '08:15 AM',
+    daysAgo: 5,
+    description: 'Automated match from site sensor telemetry on compressor installation.',
+    confidence: 96,
+    user: 'System (AI)',
+    hash: '9f23c7b1',
+    activityCode: '24P210',
+    activityName: 'Compressor Skid Alignment',
+    wbs: 'L6-MEC-08',
+    prevStatus: 'IN_PROGRESS',
+    prevPercent: 30,
+    prevStart: '28/08/2026',
+    newStatus: 'IN_PROGRESS',
+    newPercent: 70,
+    newStart: '28/08/2026',
+  },
+  {
+    id: 'aud-005',
+    type: 'OVERRIDE',
+    time: '04:45 PM',
+    daysAgo: 6,
+    description: 'Field Engineer Priya Patel corrected WBS mapping for cable tray installation.',
+    confidence: 91,
+    user: 'Priya Patel (Engineer)',
+    hash: '7c89a022',
+    activityCode: '24P214',
+    activityName: 'Cable Tray Conduit Pulling',
+    wbs: 'L6-ELE-03',
+    prevStatus: 'NOT_STARTED',
+    prevPercent: 0,
+    prevStart: '--/--/----',
+    newStatus: 'IN_PROGRESS',
+    newPercent: 50,
+    newStart: '30/08/2026',
+  },
+];
 
-  const [activeProject, setActiveProject] = useState<{
-    project_id: string;
-    name: string;
-    displayCode: string;
-  } | null>(null);
-
+export default function AuditTrail() {
+  const { selectedProjectId: projectId, projects } = useProjectContext();
+  const currentProject = projects.find(p => p.project_id === projectId);
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState<'7d' | '30d' | 'all'>('7d');
   const [decisionFilter, setDecisionFilter] = useState<'all' | 'AUTO_LINK' | 'OVERRIDE' | 'VERIFIED'>('all');
@@ -57,51 +149,16 @@ function AuditTrailContent() {
   const [isDecisionOpen, setIsDecisionOpen] = useState(false);
   const [exportNotice, setExportNotice] = useState(false);
   const [clearNotice, setClearNotice] = useState(false);
-  const [liveAuditData, setLiveAuditData] = useState<AuditRecord[]>([]);
-
-  const resolveActiveProject = useCallback(async () => {
-    const deleted = getDeletedProjectCodes();
-    const res = await apiFetchSafe<{ project_id: string; name: string }[]>('/projects');
-    if (!res.ok || !Array.isArray(res.data)) {
-      setActiveProject(null);
-      return null;
-    }
-    const available = res.data
-      .filter((p) => !deleted.has(p.project_id))
-      .map((p) => ({
-        project_id: p.project_id,
-        name: p.name,
-        displayCode: p.project_id === 'PROJ-ALPHA' ? '24P201' : p.project_id,
-      }));
-
-    if (available.length === 0) {
-      setActiveProject(null);
-      return null;
-    }
-
-    const requestedId = searchParams.get('project_id');
-    const normalizedReq = requestedId === 'PRAGATI-01' || requestedId === '24P201' ? 'PROJ-ALPHA' : requestedId;
-    const current = (normalizedReq ? available.find((p) => p.project_id === normalizedReq) : null) || available[0];
-    setActiveProject(current);
-    return current;
-  }, [searchParams]);
+  const [liveAuditData, setLiveAuditData] = useState<AuditRecord[]>(INITIAL_AUDIT_DATA);
 
   const fetchAuditTrail = useCallback(async () => {
-    const proj = await resolveActiveProject();
-    if (!proj) {
-      setLiveAuditData([]);
-      return;
-    }
+    // 1. Fetch live audit records from backend
+    const auditRes = await apiFetchSafe<any[]>('/audit');
+    if (!auditRes.ok || !Array.isArray(auditRes.data)) return;
 
-    // 1. Fetch live audit records from backend scoped to project
-    const auditRes = await apiFetchSafe<any[]>(`/audit?project_id=${encodeURIComponent(proj.project_id)}`);
-    if (!auditRes.ok || !Array.isArray(auditRes.data)) {
-      setLiveAuditData([]);
-      return;
-    }
-
-    // 2. Fetch activities metadata for descriptions & WBS codes for active project
-    const actRes = await apiFetchSafe<any[]>(`/projects/${encodeURIComponent(proj.project_id)}/activities`);
+    // 2. Fetch activities metadata for descriptions & WBS codes
+    if (!projectId) return;
+    const actRes = await apiFetchSafe<any[]>(`/projects/${projectId}/activities`);
     const actMap = new Map<string, { desc: string; wbs: string }>();
     if (actRes.ok && Array.isArray(actRes.data)) {
       actRes.data.forEach((a) => {
@@ -147,8 +204,20 @@ function AuditTrailContent() {
       };
     });
 
-    setLiveAuditData(liveMapped);
-  }, [resolveActiveProject]);
+    const isCleared = typeof window !== 'undefined' && localStorage.getItem('pragatisetu:audit-cleared') === 'true';
+    if (isCleared && liveMapped.length === 0) {
+      setLiveAuditData([]);
+      return;
+    }
+    if (liveMapped.length > 0 && typeof window !== 'undefined') {
+      localStorage.removeItem('pragatisetu:audit-cleared');
+    }
+
+    // Merge live records in front of INITIAL_AUDIT_DATA (avoiding duplicates)
+    const liveIds = new Set(liveMapped.map((r) => r.id));
+    const merged = [...liveMapped, ...INITIAL_AUDIT_DATA.filter((r) => !liveIds.has(r.id))];
+    setLiveAuditData(merged);
+  }, [projectId]);
 
   useEffect(() => {
     void fetchAuditTrail();
@@ -207,17 +276,26 @@ function AuditTrailContent() {
   };
 
   const handleClearAuditTrail = async () => {
-    if (!activeProject) return;
-    if (!confirm(`Clear all audit trail records for ${activeProject.name}?`)) return;
+    if (!confirm('Clear all audit trail records to start a fresh workspace?')) return;
     try {
-      await apiFetchSafe(`/audit/clear?project_id=${encodeURIComponent(activeProject.project_id)}`, { method: 'POST' });
+      await apiFetchSafe('/audit/clear', { method: 'POST' });
       setLiveAuditData([]);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('pragatisetu:audit-cleared', 'true');
+      }
       notifyAppDataRefresh({ source: 'audit-trail' });
       setClearNotice(true);
       setTimeout(() => setClearNotice(false), 3500);
     } catch {
       setLiveAuditData([]);
     }
+  };
+
+  const handleRestoreDemoRecords = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('pragatisetu:audit-cleared');
+    }
+    setLiveAuditData(INITIAL_AUDIT_DATA);
   };
 
   return (
@@ -230,7 +308,7 @@ function AuditTrailContent() {
               PragatiSetu Compliance
             </span>
             <span className="text-[11px] font-mono text-on-surface-variant bg-surface-container-low px-2 py-0.5 rounded border border-surface-border font-semibold">
-              {activeProject ? `${activeProject.name} (${activeProject.displayCode})` : 'No Active Project'}
+              {currentProject ? `${currentProject.name} (${projectId})` : (projectId || 'No Project')}
             </span>
           </div>
           <h2 className="text-[28px] font-bold text-on-surface leading-tight">Audit &amp; Compliance Trail</h2>
@@ -358,7 +436,7 @@ function AuditTrailContent() {
             onClick={handleClearAuditTrail}
             disabled={liveAuditData.length === 0}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-surface-border bg-surface-container-low hover:bg-red-500/10 hover:text-red-600 hover:border-red-500/30 transition-colors font-mono text-[12px] text-on-surface-variant font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Clear audit trail records for current project"
+            title="Clear audit trail records for a fresh workspace"
           >
             <Trash2 size={14} /> Clear History
           </button>
@@ -405,27 +483,24 @@ function AuditTrailContent() {
                   </div>
                   <p className="text-[13px] text-on-surface mt-2 leading-relaxed">{r.description}</p>
                 </div>
-
-                <div className="mt-4 pt-4 border-t border-surface-border/60 space-y-2 text-[12px]">
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">User</span>
-                    <span className="font-mono text-on-surface font-semibold truncate max-w-[120px]" title={r.user}>
-                      {r.user}
-                    </span>
+                <div className="mt-5 pt-3 border-t border-surface-border space-y-1.5 text-[12px]">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-on-surface-variant">Confidence</span>
+                    <span className="font-mono text-status-completed font-bold">{r.confidence}%</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Confidence</span>
-                    <span className="font-mono text-primary font-bold">{r.confidence}%</span>
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-on-surface-variant">User</span>
+                    <span className="font-mono text-on-surface truncate max-w-[140px]" title={r.user}>{r.user}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Checksum</span>
-                    <span className="font-mono text-on-surface-variant text-[11px]">{r.hash}</span>
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-on-surface-variant">Hash</span>
+                    <span className="font-mono text-outline">{r.hash}</span>
                   </div>
                 </div>
               </div>
 
-              {/* Data Diff Column */}
-              <div className="flex-1 p-5">
+              {/* State Transition Diff Column */}
+              <div className="flex-1 p-6">
                 <div className="flex items-center gap-3 mb-5">
                   <div className="w-9 h-9 rounded-lg bg-surface-container-high flex items-center justify-center text-primary">
                     <History size={18} />
@@ -487,13 +562,20 @@ function AuditTrailContent() {
           ))
         ) : (
           <div className="p-10 text-center bg-surface-container-lowest border border-surface-border rounded-xl text-on-surface flex flex-col items-center justify-center max-w-md mx-auto space-y-3">
-            <div className="w-12 h-12 rounded-full bg-surface-container text-on-surface-variant flex items-center justify-center">
-              <History size={24} />
+            <div className="w-12 h-12 rounded-full bg-status-completed/10 text-status-completed flex items-center justify-center">
+              <CheckCircle2 size={24} />
             </div>
-            <h4 className="text-[16px] font-semibold">No audit activity yet.</h4>
+            <h4 className="text-[16px] font-semibold">Audit Trail is Clean</h4>
             <p className="text-[13px] text-on-surface-variant leading-relaxed">
-              Immutable audit records will automatically appear here when DPR reports are processed, schedule activities are linked, or supervisor reviews occur.
+              All previous audit records have been cleared. As you link activities, process DPRs, or review field updates, new immutable logs will appear here.
             </p>
+            <button
+              type="button"
+              onClick={handleRestoreDemoRecords}
+              className="mt-2 px-3 py-1.5 border border-surface-border text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low text-[12px] font-medium rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <RotateCw size={13} /> Load Demo Audit Logs
+            </button>
           </div>
         )}
 
@@ -517,13 +599,5 @@ function AuditTrailContent() {
         )}
       </div>
     </div>
-  );
-}
-
-export default function AuditTrail() {
-  return (
-    <Suspense fallback={<div className="flex items-center justify-center h-64 text-on-surface-variant">Loading audit trail...</div>}>
-      <AuditTrailContent />
-    </Suspense>
   );
 }

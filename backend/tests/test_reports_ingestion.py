@@ -22,7 +22,7 @@ def test_1_valid_txt_upload(client):
     response = client.post("/reports/upload", files=files, data=data)
     assert response.status_code == 201
     res = response.json()
-    assert res["processing_status"] in ("VALIDATED", "EVENTS_EXTRACTED", "COMPLETED")
+    assert res["processing_status"] in ("VALIDATED", "EVENTS_EXTRACTED", "PROCESSED")
     assert res["source_type"] == "TXT"
     assert res["duplicate"] is False
     assert res["validation"]["valid"] is True
@@ -36,7 +36,7 @@ def test_2_valid_csv_upload(client):
     assert response.status_code == 201
     res = response.json()
     assert res["source_type"] == "CSV"
-    assert res["processing_status"] in ("VALIDATED", "EVENTS_EXTRACTED", "COMPLETED")
+    assert res["processing_status"] in ("VALIDATED", "EVENTS_EXTRACTED", "PROCESSED")
 
 def test_3_valid_xlsx_upload(client):
     df = pd.DataFrame([
@@ -173,7 +173,7 @@ def test_16_successful_sourcereport_creation(client, db_session):
     assert report_db is not None
     assert report_db.project_id == "PROJ-ALPHA"
     assert report_db.discipline == "Mechanical"
-    assert report_db.processing_status in ("VALIDATED", "EVENTS_EXTRACTED", "COMPLETED")
+    assert report_db.processing_status in ("VALIDATED", "EVENTS_EXTRACTED", "PROCESSED")
 
 def test_17_rejected_report_does_not_create_db_record(client, db_session):
     count_before = db_session.query(SourceReport).count()

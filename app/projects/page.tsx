@@ -5,60 +5,36 @@ import { Folder, ArrowRight, Plus, X, Loader2, CheckCircle2, Building2, Trash2, 
 import Link from 'next/link';
 import { useEffect, useState, useCallback } from 'react';
 import { useAppDataRefresh, notifyAppDataRefresh } from '@/lib/app-sync';
-import { getDeletedProjectCodes, recordDeletedProjectCode, unrecordDeletedProjectCode } from '@/lib/projects';
+import { useProjectContext } from '@/lib/project-context';
 
 export default function Projects() {
-  const [projects, setProjects] = useState<{
-    name: string;
-    code: string;
-    displayCode: string;
-    status: string;
-    progress: number;
-  }[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { selectedProjectId, setSelectedProjectId } = useProjectContext();
+  const [projects, setProjects] = useState<any[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [newProjName, setNewProjName] = useState('');
   const [newProjDesc, setNewProjDesc] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  const [projectToDelete, setProjectToDelete] = useState<{ code: string; name: string } | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-
-  const fetchProjects = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    const deleted = getDeletedProjectCodes();
-    try {
-      const res = await apiFetchSafe<{ project_id: string; name: string; description?: string; created_at?: string; status?: string; progress_percentage?: number }[]>('/projects');
-      if (res.ok && Array.isArray(res.data)) {
-        const apiProjects = res.data
-          .filter((p) => !deleted.has(p.project_id))
-          .map((p) => {
-            const isAlpha = p.project_id === 'PROJ-ALPHA' || p.name.includes('Project Alpha');
-            const displayStatus = p.status && p.status !== 'N/A' ? p.status : isAlpha ? 'Operational' : 'Planning';
-            return {
-              name: isAlpha ? 'Project Alpha' : p.name,
+  const fetchProjects = useCallback(() => {
+    apiFetch<{ project_id: string; name: string; description?: string; created_at?: string; status?: string; progress_percentage?: number }[]>('/projects')
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setProjects(
+            data.map((p) => ({
+              name: p.name,
               code: p.project_id,
-              displayCode: isAlpha ? '24P201' : p.project_id,
-              status: displayStatus,
+              displayCode: p.project_id,
+              status: p.status && p.status !== 'N/A' ? p.status : 'Planning',
               progress: p.progress_percentage != null ? p.progress_percentage : 0,
-            };
-          });
-        setProjects(apiProjects);
-        setError(null);
-      } else {
-        setError(res.error || 'Failed to load projects from server.');
-        setProjects([]);
-      }
-    } catch {
-      setError('Network error connecting to backend API.');
-      setProjects([]);
-    } finally {
-      setLoading(false);
-    }
+            }))
+          );
+        }
+      })
+      .catch(() => {
+        // fetch failed — keep current state
+      });
   }, []);
 
   useEffect(() => {
@@ -89,7 +65,6 @@ export default function Projects() {
       });
 
       if (res.ok) {
-        unrecordDeletedProjectCode(generatedId);
         setFeedback({ type: 'success', message: `Project "${newProjName.trim()}" created successfully!` });
         notifyAppDataRefresh({ source: 'projects' });
         fetchProjects();
@@ -109,45 +84,27 @@ export default function Projects() {
     }
   };
 
-  const handleDeleteProject = async () => {
-    if (!projectToDelete || isDeleting) return;
-    setIsDeleting(true);
-    setDeleteError(null);
-
+  const handleDeleteProject = async (projectId: string) => {
+    setIsSubmitting(true);
+    setFeedback(null);
     try {
-      const res = await apiFetchSafe(`/projects/${encodeURIComponent(projectToDelete.code)}`, {
-        method: 'DELETE',
-      });
-
-      if (res.ok || res.status === 404 || res.error?.includes('not found')) {
-        recordDeletedProjectCode(projectToDelete.code);
-        clearFallbackData(projectToDelete.code);
-        setProjects((prev) => {
-          const next = prev.filter((p) => p.code !== projectToDelete.code);
-          if (next.length === 0) {
-            clearFallbackData();
-          }
-          return next;
-        });
+      const res = await apiFetchSafe(`/projects/${projectId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setFeedback({ type: 'success', message: 'Project deleted successfully.' });
+        if (selectedProjectId === projectId) {
+          setSelectedProjectId(null);
+        }
         notifyAppDataRefresh({ source: 'projects' });
-        setProjectToDelete(null);
+        fetchProjects();
+        setDeleteConfirmId(null);
       } else {
-        setDeleteError(res.error || 'Failed to delete project.');
+        setFeedback({ type: 'error', message: res.error || 'Failed to delete project.' });
       }
     } catch {
-      recordDeletedProjectCode(projectToDelete.code);
-      clearFallbackData(projectToDelete.code);
-      setProjects((prev) => {
-        const next = prev.filter((p) => p.code !== projectToDelete.code);
-        if (next.length === 0) {
-          clearFallbackData();
-        }
-        return next;
-      });
-      notifyAppDataRefresh({ source: 'projects' });
-      setProjectToDelete(null);
+      setFeedback({ type: 'error', message: 'Network error deleting project.' });
     } finally {
-      setIsDeleting(false);
+      setIsSubmitting(false);
+      setTimeout(() => setFeedback(null), 3000);
     }
   };
 
@@ -174,155 +131,54 @@ export default function Projects() {
         </button>
       </div>
       
-      {error && (
-        <div className="p-4 rounded-xl border border-status-conflict/30 bg-status-conflict/10 text-status-conflict text-[13px] flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <AlertTriangle size={16} />
-            <span>{error}</span>
-          </div>
-          <button
-            type="button"
-            onClick={fetchProjects}
-            className="text-[12px] font-bold underline cursor-pointer hover:opacity-80"
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      {loading ? (
-        <div className="flex items-center justify-center py-20 text-on-surface-variant">
-          <Loader2 size={24} className="animate-spin text-primary mr-2" />
-          <span className="text-[14px]">Loading projects from database...</span>
-        </div>
-      ) : projects.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {projects.map((p) => (
-            <div key={p.code} className="bg-surface-container-lowest border border-surface-border rounded-xl p-6 hover:shadow-md transition-shadow">
-              <div className="flex justify-between items-start mb-4">
-                <div className="w-10 h-10 rounded-lg bg-primary-fixed/30 text-primary flex items-center justify-center">
-                  <Folder size={20} />
-                </div>
-                <span className={`text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-sm border ${
-                  p.status === 'Completed'
-                    ? 'bg-status-completed/10 text-status-completed border-status-completed/30'
-                    : p.status === 'Operational'
-                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                    : p.status === 'Planning'
-                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
-                    : 'bg-surface-container-high text-on-surface-variant border-surface-border'
-                }`}>
-                  {p.status}
-                </span>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {projects.map((p) => (
+          <div key={p.code} className="bg-surface-container-lowest border border-surface-border rounded-xl p-6 hover:shadow-md transition-shadow">
+            <div className="flex justify-between items-start mb-4">
+              <div className="w-10 h-10 rounded-lg bg-primary-fixed/30 text-primary flex items-center justify-center">
+                <Folder size={20} />
               </div>
-              <h3 className="text-[18px] font-semibold text-on-surface mb-1">{p.name}</h3>
-              <p className="font-mono text-[13px] text-on-surface-variant mb-6">{p.displayCode ?? p.code}</p>
-              
-              <div className="space-y-2 mb-6">
-                <div className="flex justify-between text-[12px] font-bold">
-                  <span className="text-on-surface-variant">Progress</span>
-                  <span className="text-on-surface">{p.progress}%</span>
-                </div>
-                <div className="w-full bg-surface-container rounded-full h-1.5">
-                  <div className="bg-primary h-1.5 rounded-full" style={{ width: `${p.progress}%` }}></div>
-                </div>
+              <span className={`text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-sm border ${
+                p.status === 'Completed'
+                  ? 'bg-status-completed/10 text-status-completed border-status-completed/30'
+                  : p.status === 'Operational'
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                  : p.status === 'Planning'
+                  ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                  : 'bg-surface-container-high text-on-surface-variant border-surface-border'
+              }`}>
+                {p.status}
+              </span>
+            </div>
+            <h3 className="text-[18px] font-semibold text-on-surface mb-1">{p.name}</h3>
+            <p className="font-mono text-[13px] text-on-surface-variant mb-6">{p.displayCode ?? p.code}</p>
+            
+            <div className="space-y-2 mb-6">
+              <div className="flex justify-between text-[12px] font-bold">
+                <span className="text-on-surface-variant">Progress</span>
+                <span className="text-on-surface">{p.progress}%</span>
               </div>
-
-              <div className="flex items-center gap-2">
-                <Link href={`/?project_id=${encodeURIComponent(p.code)}`} className="flex-1 py-2 bg-surface-container-low hover:bg-surface-container-high border border-surface-border rounded-lg text-[13px] font-bold text-on-surface flex items-center justify-center gap-2 transition-colors">
-                  Open Dashboard <ArrowRight size={16} />
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDeleteError(null);
-                    setProjectToDelete({ code: p.code, name: p.name });
-                  }}
-                  title={`Delete ${p.name}`}
-                  aria-label={`Delete ${p.name}`}
-                  className="p-2 border border-surface-border hover:border-status-conflict/40 hover:bg-status-conflict/10 text-on-surface-variant hover:text-status-conflict rounded-lg transition-colors cursor-pointer shrink-0"
-                >
-                  <Trash2 size={16} />
-                </button>
+              <div className="w-full bg-surface-container rounded-full h-1.5">
+                <div className="bg-primary h-1.5 rounded-full" style={{ width: `${p.progress}%` }}></div>
               </div>
             </div>
-          ))}
-        </div>
-      ) : !error && (
-        <div className="p-12 text-center bg-surface-container-lowest border border-surface-border rounded-xl text-on-surface flex flex-col items-center justify-center max-w-md mx-auto space-y-3">
-          <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center">
-            <Folder size={24} />
-          </div>
-          <h4 className="text-[16px] font-semibold">No Projects Found</h4>
-          <p className="text-[13px] text-on-surface-variant leading-relaxed">
-            There are no projects configured in the database yet. Click &quot;New Project&quot; above to initialize your first project.
-          </p>
-        </div>
-      )}
 
-      {/* Delete Confirmation Modal */}
-      {projectToDelete && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-surface-container-lowest border border-surface-border rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-surface-border pb-3">
-              <div className="flex items-center gap-2 font-bold text-[16px] text-status-conflict">
-                <AlertTriangle size={18} />
-                <span>Delete Project</span>
-              </div>
+            <div className="flex gap-2">
+              <Link href={`/?project_id=${encodeURIComponent(p.code)}`} onClick={() => setSelectedProjectId(p.code)} className="flex-1 py-2 bg-surface-container-low hover:bg-surface-container-high border border-surface-border rounded-lg text-[13px] font-bold text-on-surface flex items-center justify-center gap-2 transition-colors">
+                Open Dashboard <ArrowRight size={16} />
+              </Link>
               <button
                 type="button"
-                disabled={isDeleting}
-                onClick={() => {
-                  setProjectToDelete(null);
-                  setDeleteError(null);
-                }}
-                className="p-1 text-on-surface-variant hover:text-on-surface rounded-lg hover:bg-surface-container cursor-pointer"
+                onClick={() => setDeleteConfirmId(p.code)}
+                className="w-10 flex items-center justify-center rounded-lg border border-status-conflict/30 bg-status-conflict/10 text-status-conflict hover:bg-status-conflict/20 transition-colors"
+                title="Delete Project"
               >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="space-y-2 text-[13px] text-on-surface">
-              <p>
-                Are you sure you want to delete <span className="font-semibold text-on-surface">{projectToDelete.name}</span> (<code className="text-primary font-mono">{projectToDelete.code}</code>)?
-              </p>
-              <p className="text-on-surface-variant text-[12px]">
-                This will permanently remove the project and its associated schedule activities, daily reports, review queue items, and audit records. This action cannot be undone.
-              </p>
-            </div>
-
-            {deleteError && (
-              <div className="p-2.5 rounded-lg text-[12px] flex items-center gap-2 bg-status-conflict/10 text-status-conflict border border-status-conflict/20">
-                <X size={15} />
-                <span>{deleteError}</span>
-              </div>
-            )}
-
-            <div className="flex justify-end gap-2 pt-3 border-t border-surface-border">
-              <button
-                type="button"
-                disabled={isDeleting}
-                onClick={() => {
-                  setProjectToDelete(null);
-                  setDeleteError(null);
-                }}
-                className="px-4 py-2 bg-surface-container hover:bg-surface-container-high text-on-surface font-semibold rounded-lg transition-colors cursor-pointer text-[13px]"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={isDeleting}
-                onClick={handleDeleteProject}
-                className="px-4 py-2 bg-status-conflict hover:bg-status-conflict/90 text-white font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer text-[13px] shadow-xs disabled:opacity-50"
-              >
-                {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                <span>{isDeleting ? 'Deleting...' : 'Delete Project'}</span>
+                <Trash2 size={16} />
               </button>
             </div>
           </div>
-        </div>
-      )}
+        ))}
+      </div>
 
       {/* New Project Modal */}
       {isModalOpen && (
@@ -397,6 +253,50 @@ export default function Projects() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-surface-container-lowest border border-status-conflict/30 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-status-conflict mb-2">
+              <AlertTriangle size={24} />
+              <h3 className="font-bold text-[18px]">Delete Project?</h3>
+            </div>
+            
+            <p className="text-[14px] text-on-surface-variant leading-relaxed">
+              This will remove the project's schedule, reports, extracted events, matching decisions, review state and vector index.
+            </p>
+            <p className="text-[14px] font-bold text-on-surface">This action cannot be undone.</p>
+
+            {feedback && feedback.type === 'error' && (
+              <div className="p-2.5 rounded-lg text-[12px] flex items-center gap-2 bg-status-conflict/10 text-status-conflict border border-status-conflict/20">
+                <X size={15} />
+                <span>{feedback.message}</span>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-4">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmId(null)}
+                disabled={isSubmitting}
+                className="px-4 py-2 bg-surface-container hover:bg-surface-container-high text-on-surface font-semibold rounded-lg transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteProject(deleteConfirmId)}
+                disabled={isSubmitting}
+                className="px-4 py-2 bg-status-conflict text-white font-bold rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                {isSubmitting ? <Loader2 size={14} className="animate-spin" /> : null}
+                <span>Delete Project</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -25,8 +25,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { apiFetchSafe } from '@/lib/api';
-import { getDeletedProjectCodes } from '@/lib/projects';
-import { useAppDataRefresh } from '@/lib/app-sync';
+import { useProjectContext } from '@/lib/project-context';
 
 interface ChatActivityItem {
   activity_id: string;
@@ -48,12 +47,7 @@ interface ChatMessage {
   model?: string;
 }
 
-const QUICK_PROMPTS = [
-  '📊 Overall progress of Project Alpha?',
-  '🔍 Find pipeline welding & spool activities',
-  '⚠️ Are there any schedule conflicts or delays?',
-  '🎙️ How do I log daily voice progress updates?',
-];
+// Removed hardcoded QUICK_PROMPTS array
 
 // Helper to format simple markdown elements (bold, italic, code, headers, links, lists)
 function renderFormattedText(text: string) {
@@ -184,42 +178,21 @@ function renderInlineStyles(text: string): React.ReactNode {
 export function AiChatDrawer() {
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [projects, setProjects] = useState<{ project_id: string; name: string; displayCode: string }[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+  const { selectedProjectId, setSelectedProjectId, projects } = useProjectContext();
+  const currentProject = projects.find((p) => p.project_id === selectedProjectId);
+
+  const quickPrompts = [
+    `📊 Overall progress of ${currentProject ? currentProject.name : 'the project'}?`,
+    '🔍 Find pipeline welding & spool activities',
+    '⚠️ Are there any schedule conflicts or delays?',
+    '🎙️ How do I log daily voice progress updates?',
+  ];
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [engineSource, setEngineSource] = useState<'groq' | 'local_rag'>('local_rag');
-
-  const fetchProjects = useCallback(async () => {
-    const deleted = getDeletedProjectCodes();
-    const res = await apiFetchSafe<{ project_id: string; name: string }[]>('/projects');
-    if (res.ok && Array.isArray(res.data)) {
-      const list = res.data
-        .filter((p) => !deleted.has(p.project_id))
-        .map((p) => ({
-          project_id: p.project_id,
-          name: p.name,
-          displayCode: p.project_id === 'PROJ-ALPHA' ? '24P201' : p.project_id,
-        }));
-      setProjects(list);
-      setSelectedProjectId((prev) => {
-        if (prev && list.some((p) => p.project_id === prev)) return prev;
-        return list[0]?.project_id || '';
-      });
-    } else {
-      setProjects([]);
-      setSelectedProjectId('');
-    }
-  }, []);
-
-  useEffect(() => {
-    void fetchProjects();
-  }, [fetchProjects]);
-
-  useAppDataRefresh(fetchProjects);
 
   // Key Modal State
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
@@ -340,8 +313,7 @@ export function AiChatDrawer() {
       });
       if (res.ok && res.data && res.data.configured) {
         if (typeof window !== 'undefined') {
-          // Never store API keys in localStorage (Safety Requirement 8). Purge any legacy key.
-          localStorage.removeItem('pragatisetu_groq_key');
+          localStorage.setItem('pragatisetu_groq_key', inputApiKey.trim());
         }
         setEngineSource('groq');
         setKeyFeedback({ type: 'success', text: 'Groq API Key activated! Llama-3.3-70B is now active.' });
@@ -366,19 +338,6 @@ export function AiChatDrawer() {
     if (!query || isLoading) return;
 
     setInputValue('');
-    if (!selectedProjectId) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `ai-${Date.now()}`,
-          role: 'assistant',
-          content: 'No active project available. Please select or create a project before chatting.',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ]);
-      return;
-    }
-
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
       role: 'user',
@@ -391,6 +350,8 @@ export function AiChatDrawer() {
     setIsLoading(true);
 
     try {
+      const storedKey = typeof window !== 'undefined' ? localStorage.getItem('pragatisetu_groq_key') : null;
+
       const res = await apiFetchSafe<{
         reply: string;
         grounded_candidates: string[];
@@ -405,8 +366,9 @@ export function AiChatDrawer() {
           project_id: selectedProjectId,
           messages: newHistory.map((m) => ({ role: m.role, content: m.content })),
           top_k: 4,
+          api_key: storedKey || undefined,
         }),
-      });
+      }, 30000);
 
       if (res.ok && res.data) {
         setEngineSource(res.data.source === 'groq' ? 'groq' : 'local_rag');
@@ -457,14 +419,14 @@ export function AiChatDrawer() {
             setTimeout(() => inputRef.current?.focus(), 200);
           }}
           className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 bg-primary text-on-primary rounded-full shadow-xl hover:shadow-2xl hover:scale-105 transition-all duration-200 cursor-pointer group border border-primary/30"
-          title="Open PragatiSetu AI Assistant"
+          title="Open PragatiSetu AI Copilot"
         >
           <div className="relative flex items-center justify-center">
             <Bot size={20} className="group-hover:rotate-12 transition-transform duration-300" />
             <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-primary animate-pulse"></span>
           </div>
           <span className="text-[13px] font-bold tracking-wide hidden sm:inline-block">
-            AI Assistant
+            AI Copilot
           </span>
         </button>
       )}
@@ -526,24 +488,19 @@ export function AiChatDrawer() {
               </button>
 
               {/* Project Picker */}
-              {projects.length > 0 ? (
-                <select
-                  value={selectedProjectId}
-                  onChange={(e) => setSelectedProjectId(e.target.value)}
-                  className="text-[11px] font-bold bg-surface-container border border-surface-border rounded-md px-2 py-1 text-on-surface focus:outline-none cursor-pointer max-w-[170px] truncate"
-                  title="Active Project Context"
-                >
-                  {projects.map((p) => (
-                    <option key={p.project_id} value={p.project_id}>
-                      {p.name} ({p.displayCode})
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="text-[11px] text-on-surface-variant bg-surface-container px-2 py-1 rounded border border-surface-border">
-                  No projects available
-                </span>
-              )}
+              <select
+                value={selectedProjectId || ''}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                className="text-[11px] font-bold bg-surface-container border border-surface-border rounded-md px-2 py-1 text-on-surface focus:outline-none cursor-pointer max-w-[120px] text-ellipsis"
+                title="Active Project Context"
+              >
+                {!selectedProjectId && <option value="" disabled>No Project</option>}
+                {projects.map(p => (
+                  <option key={p.project_id} value={p.project_id}>
+                    {p.name} ({p.project_id})
+                  </option>
+                ))}
+              </select>
 
               {/* Clear */}
               {messages.length > 0 && (
@@ -572,7 +529,7 @@ export function AiChatDrawer() {
                 type="button"
                 onClick={() => setIsOpen(false)}
                 className="p-1.5 text-on-surface-variant hover:text-on-surface rounded-lg hover:bg-surface-container transition-colors cursor-pointer"
-                title="Close AI Assistant"
+                title="Close AI Copilot"
               >
                 <X size={18} />
               </button>
@@ -643,7 +600,19 @@ export function AiChatDrawer() {
 
           {/* Conversation Feed */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-surface">
-            {messages.length === 0 ? (
+            {!selectedProjectId ? (
+              <div className="h-full flex flex-col justify-center items-center text-center px-4 py-8 max-w-sm mx-auto">
+                <div className="w-12 h-12 rounded-2xl bg-surface-container-high text-on-surface-variant flex items-center justify-center mb-3">
+                  <Bot size={24} />
+                </div>
+                <h4 className="text-[16px] font-bold text-on-surface mb-1">
+                  No Project Selected
+                </h4>
+                <p className="text-[12px] text-on-surface-variant leading-relaxed">
+                  Please select a project to ask project-specific questions and analyze schedules.
+                </p>
+              </div>
+            ) : messages.length === 0 ? (
               <div className="h-full flex flex-col justify-center items-center text-center px-4 py-8 max-w-sm mx-auto">
                 <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-3">
                   <Bot size={24} />
@@ -660,7 +629,7 @@ export function AiChatDrawer() {
                   <p className="text-[10px] font-bold uppercase tracking-wider text-outline mb-1 px-1">
                     Suggested Queries
                   </p>
-                  {QUICK_PROMPTS.map((prompt, i) => (
+                  {quickPrompts.map((prompt, i) => (
                     <button
                       key={i}
                       type="button"
@@ -786,8 +755,8 @@ export function AiChatDrawer() {
                       ? 'Listening to voice input...'
                       : 'Ask PragatiSetu AI anything (e.g. status, delays, piping)...'
                   }
-                  disabled={isLoading}
-                  className="w-full px-3.5 py-2.5 pr-10 text-[13px] rounded-xl bg-surface border border-surface-border text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all"
+                  disabled={isLoading || !selectedProjectId}
+                  className="w-full px-3.5 py-2.5 pr-10 text-[13px] rounded-xl bg-surface border border-surface-border text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all disabled:opacity-50"
                 />
 
                 {/* Voice Input Button */}
@@ -809,7 +778,7 @@ export function AiChatDrawer() {
 
               <button
                 type="submit"
-                disabled={!inputValue.trim() || isLoading}
+                disabled={!inputValue.trim() || isLoading || !selectedProjectId}
                 className="p-2.5 rounded-xl bg-primary text-on-primary hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer shadow-xs"
                 title="Send Message"
               >
